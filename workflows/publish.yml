@@ -13,7 +13,7 @@ permissions:
   packages: write
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: paulkakell/timeboard
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
