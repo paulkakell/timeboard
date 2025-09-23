@@ -2,7 +2,13 @@ name: publish
 on:
   push:
     branches: [ main ]
-    paths: [ "app/**", "Dockerfile", "requirements.txt" ]
+    tags: [ 'v*' ]
+    paths:
+      - "Dockerfile"
+      - "requirements.txt"
+      - "app/**"
+  workflow_dispatch: {}
+
 
 jobs:
   build:
@@ -19,14 +25,19 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set tags
+
+      - name: Compute tags
         id: meta
         run: |
-          IMAGE=ghcr.io/${{ github.repository }}/timeboard
-          echo "image=$IMAGE" >> $GITHUB_OUTPUT
-          echo "tags=${IMAGE}:latest,${IMAGE}:${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
-      - uses: docker/build-push-action@v6
+          IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          SHORT_SHA=${GITHUB_SHA::7}
+          REF=${GITHUB_REF_NAME}
+          echo "tags=${IMAGE}:latest,${IMAGE}:${SHORT_SHA},${IMAGE}:${REF}" >> $GITHUB_OUTPUT
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
         with:
+          context: .
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
