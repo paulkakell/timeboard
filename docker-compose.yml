@@ -1,0 +1,15 @@
+version: "3.9"
+services:
+  timeboard:
+    build: .
+    image: ghcr.io/paulkakell/timeboard:latest
+    container_name: timeboard
+    environment:
+      - TZ=America/Denver
+    ports:
+      - "8080:8000"
+    volumes:
+      - timeboard_data:/data
+    restart: unless-stopped
+volumes:
+  timeboard_data

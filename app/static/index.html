@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Timeboard</title>
+  <link rel="stylesheet" href="/static/styles.css"/>
+</head>
+<body>
+  <header>
+    <h1>Timeboard</h1>
+    <input id="search" placeholder="Search (supports name:foo type:bar tag:baz AND/OR)"/>
+  </header>
+
+  <section class="table-wrap">
+    <table id="taskTable">
+      <thead>
+        <tr>
+          <th data-sort="actions">Done</th>
+          <th data-sort="open">Open</th>
+          <th data-sort="time_left_ms">Time Left</th>
+          <th data-sort="name">Name</th>
+          <th data-sort="type">Type</th>
+          <th data-sort="subtype">Subtype</th>
+          <th data-sort="description">Task Instructions</th>
+          <th data-sort="tags">Tags</th>
+          <th data-sort="recurrence">Recurrence</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
