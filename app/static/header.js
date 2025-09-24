@@ -7,7 +7,11 @@
   }
   function ensureHeader() {
     var hdr = document.getElementById("header");
+<<<<<<< HEAD
     if (!hdr) return;
+=======
+    if (!hdr) return; // page may provide its own header
+>>>>>>> 3cd270663acd16b2f2f143be7d63e11505082bcb
     var html = [
       '<div class="brand"><a href="/" data-path="/">Timeboard</a></div>',
       '<nav>',
