@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"/>
@@ -76,3 +77,92 @@
 <script src="/static/new.js"></script>
 <script src="/static/footer.js"></script>
 </body></html>
+=======
+    <!doctype html>
+    <html lang="en"><head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>New Task</title>
+    <link rel="stylesheet" href="/static/styles.css"/>
+    <script defer src="/static/header.js"></script>
+    </head><body>
+    <header id="header"></header>
+    <div class="container">
+      <div class="card">
+        <form id="taskForm" class="grid two" autocomplete="off">
+          <div>
+            <label>Name</label>
+            <input name="name" required maxlength="200"/>
+          </div>
+          <div>
+            <label>URL</label>
+            <input name="url" placeholder="https://..." inputmode="url"/>
+          </div>
+          <div>
+            <label>Type</label>
+            <input name="type" placeholder="e.g., maintenance" maxlength="100"/>
+          </div>
+          <div>
+            <label>Subtype</label>
+            <input name="subtype" placeholder="e.g., air filter" maxlength="100"/>
+          </div>
+          <div style="grid-column:1/-1">
+            <label>Tags (comma separated)</label>
+            <input name="tags" placeholder="home, hvac" maxlength="1000"/>
+          </div>
+          <div style="grid-column:1/-1">
+            <label>Description</label>
+            <textarea name="description" rows="4" maxlength="8000"></textarea>
+          </div>
+
+          <div style="grid-column:1/-1">
+            <label>Recurrence mode</label>
+            <select id="modeSel" name="recurrence_mode">
+              <option value="none">One-time due date</option>
+              <option value="after">After completion</option>
+              <option value="cron">Cron schedule</option>
+              <option value="set">Fixed dates</option>
+            </select>
+          </div>
+
+          <div id="modeNone" class="grid three" style="grid-column:1/-1;display:none">
+            <div style="grid-column:1/-1">
+              <label>Due at (YYYY-MM-DD HH:MM:SS, local time)</label>
+              <input name="due" placeholder="2025-10-01 22:00:00" inputmode="numeric"/>
+            </div>
+          </div>
+
+          <div id="modeAfter" class="grid three" style="grid-column:1/-1;display:none">
+            <div><label>Interval</label><input name="interval" type="number" value="1" min="1" step="1"/></div>
+            <div><label>Unit</label>
+              <select name="unit">
+                <option>minutes</option><option>hours</option><option>days</option><option>weeks</option><option>months</option><option>years</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="modeCron" class="grid three" style="grid-column:1/-1;display:none">
+            <div style="grid-column:1/-1"><label>Cron expression</label><input name="cron" placeholder="0 9 * * MON"/></div>
+            <div><label>Time zone</label><input id="cronTz" name="tz" placeholder="UTC"/></div>
+          </div>
+
+          <div id="modeSet" class="grid three" style="grid-column:1/-1;display:none">
+            <div style="grid-column:1/-1">
+              <label>One per line. Format ISO or YYYY-MM-DD HH:MM:SS</label>
+              <textarea name="times" rows="6" placeholder="2025-10-01 09:00:00
+2026-01-01 12:00:00"></textarea>
+            </div>
+          </div>
+
+          <div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" type="submit">Create</button>
+            <a class="btn" href="/">Cancel</a>
+          </div>
+        </form>
+      </div>
+      <div id="footer"></div>
+    </div>
+    <script src="/static/new.js"></script>
+    <script src="/static/footer.js"></script>
+    </body></html>
+>>>>>>> c12f6754ab679429516c92e84fa106cf949a473f

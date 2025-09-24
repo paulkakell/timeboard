@@ -37,7 +37,11 @@ function collectPayload(fd){
     subtype: (fd.get("subtype")||"").trim() || null,
     url: (fd.get("url")||"").trim() || null,
     description: (fd.get("description")||"").trim() || null,
+<<<<<<< HEAD
+    tags: (fd.get("tags")||"").split(",").map(s=>s.trim()).filter(Boolean).slice(0,20),
+=======
     tags: (fd.get("tags")||"").split(",").map(s=>s.trim()).filter(Boolean),
+>>>>>>> 3cd270663acd16b2f2f143be7d63e11505082bcb
     recurrence_mode: fd.get("recurrence_mode")
   };
   if (payload.recurrence_mode === "none"){
@@ -45,7 +49,11 @@ function collectPayload(fd){
     payload.due_at = due || null;
   } else if (payload.recurrence_mode === "after"){
     payload.recurrence_params = {
+<<<<<<< HEAD
+      interval: Math.max(1, parseInt(fd.get("interval")||"1",10)),
+=======
       interval: parseInt(fd.get("interval")||"1",10),
+>>>>>>> 3cd270663acd16b2f2f143be7d63e11505082bcb
       unit: fd.get("unit") || "days"
     };
   } else if (payload.recurrence_mode === "cron"){
@@ -55,7 +63,11 @@ function collectPayload(fd){
     };
   } else if (payload.recurrence_mode === "set"){
     const lines = (fd.get("times")||"").split(/\n+/).map(s=>s.trim()).filter(Boolean);
+<<<<<<< HEAD
+    payload.recurrence_params = { times: lines.slice(0,200), tz: meta.tz||"UTC" };
+=======
     payload.recurrence_params = { times: lines, tz: meta.tz||"UTC" };
+>>>>>>> 3cd270663acd16b2f2f143be7d63e11505082bcb
   }
   return payload;
 }
@@ -92,7 +104,15 @@ async function loadForEdit(id){
   showMode(modeSel.value);
   if (t.recurrence_mode === "none"){
     const due = t.due_at || "";
+<<<<<<< HEAD
     form.querySelector('[name="due"]').value = due?.replace("T"," ").slice(0,19);
+=======
+<<<<<<< HEAD
+    form.querySelector('[name="due"]').value = due ? due.replace("T"," ").slice(0,19) : "";
+=======
+    form.querySelector('[name="due"]').value = due.replace("T"," ").slice(0,19);
+>>>>>>> 3cd270663acd16b2f2f143be7d63e11505082bcb
+>>>>>>> c12f6754ab679429516c92e84fa106cf949a473f
   } else if (t.recurrence_mode === "after"){
     const p = t.recurrence_params||{};
     form.querySelector('[name="interval"]').value = p.interval||1;

@@ -22,7 +22,11 @@
     '<div class="right">',
     '  <span class="version-badge">', version, '</span>',
     powered ? ' &nbsp;|&nbsp; <span class="powered-by">Powered by '+powered+'</span>' : '',
+<<<<<<< HEAD
+    repo && repo !== "#" ? ' &nbsp;|&nbsp; <a href="'+repo+'" target="_blank" rel="noopener">Repository</a>' : '',
+=======
     ' &nbsp;|&nbsp; <a href="', repo, '" target="_blank" rel="noopener">Repository</a>',
+>>>>>>> 3cd270663acd16b2f2f143be7d63e11505082bcb
     '</div>'
   ].join("");
 })();

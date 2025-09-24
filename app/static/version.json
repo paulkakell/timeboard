@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "version": "1.3.0",
   "summary": "unknown",
   "changes": [
@@ -6,4 +7,27 @@
     "Feature: Admin page with DB details, export/import, and one-click schema upgrade. Optional ADMIN_TOKEN protection."
   ],
   "date": "2025-09-24"
+=======
+  "version": "1.1.1",
+  "summary": "Security hardening, bug fixes, full repo preserved",
+  "date": "2025-09-24",
+  "changes": [
+    "Fix: replaced Pydantic v1-style from_orm with v2-safe serializer and from_attributes config",
+    "Fix: GET /api/tasks/{id} no longer 500s and returns full TaskOut",
+    "Fix: rebuilt corrupted files (main.py, models.py, static assets)",
+    "Security: add TrustedHost middleware with env-configured ALLOWED_HOSTS",
+    "Security: optional CORS with env-configured CORS_ALLOW_ORIGINS",
+    "Security: CSP, X-Frame-Options, Referrer-Policy, X-Content-Type-Options, optional HSTS",
+    "Security: request size limit via MAX_REQUEST_BYTES",
+    "Security: front-end HTML escaping in table rendering to block XSS",
+    "Validation: strong TaskIn field limits and tag sanitation",
+    "Validation: cron expression validation and mode-specific checks",
+    "Stability: timezone-safe parsing and UTC storage using zoneinfo",
+    "UX: stable list ordering by next_due_at then id",
+    "UX: improved forms with maxlengths and input types",
+    "API: healthz endpoint for k8s probes",
+    "Infra: pool_pre_ping on SQLAlchemy engine",
+    "Packaging: preserved full original repository (including .git); only modified files replaced"
+  ]
+>>>>>>> c12f6754ab679429516c92e84fa106cf949a473f
 }

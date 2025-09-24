@@ -1,4 +1,3 @@
-/* Basic modern layout */
 :root { --bg:#0f1115; --panel:#141824; --muted:#9aa3b2; --border:#2a2f3a; --text:#e8e8e8; --primary:#6ea8fe; }
 *{box-sizing:border-box;font-family:system-ui,Arial,sans-serif}
 body{margin:0;background:var(--bg);color:var(--text)}
@@ -12,6 +11,7 @@ label{color:var(--muted);font-size:12px}
 .grid{display:grid;gap:12px}
 .grid.two{grid-template-columns:1fr 1fr}
 .grid.three{grid-template-columns:1fr 1fr 1fr}
+<<<<<<< HEAD
 .btn{padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:#1a2030;color:var(--text);cursor:pointer}
 .btn.primary{background:var(--primary);color:#000;border-color:transparent}
 .btn.danger{background:#f96a6a;border-color:transparent;color:#000}
@@ -56,3 +56,11 @@ th{font-variant:all-small-caps;letter-spacing:.04em;color:var(--muted)}
 @media(max-width:600px){ header, .subheader{padding:10px} .container{padding:10px} }
 
 .subnav{display:flex;gap:8px;margin:12px 0} .subnav a{padding:6px 10px;border:1px solid var(--border);border-radius:8px;text-decoration:none;color:var(--text)} .subnav a.active{background:var(--panel)}
+=======
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+.btn{padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:#1a2030;color:var(--text);cursor:pointer}
+.btn.danger{border-color:#753838}
+.site-footer{margin-top:24px;padding:12px 16px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.version-badge{padding:2px 8px;border:1px solid var(--border);border-radius:999px}
+>>>>>>> c12f6754ab679429516c92e84fa106cf949a473f
