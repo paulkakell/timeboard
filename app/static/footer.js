@@ -1,18 +1,28 @@
 (async function(){
-  let meta = {};
-  try { const r = await fetch('/api/meta'); meta = await r.json(); } catch(e){}
-  // fetch version.json
-  let v = { version: meta.release || 'dev'};
-  try { const r = await fetch('/assets/version.json'); v = await r.json(); } catch(e){}
-  const powered = meta.powered_by ? `Powered by ${meta.powered_by}` : '';
-  const el = document.getElementById('footer');
+  function esc(s){ return String(s||""); }
+  var meta = {};
+  try {
+    var r = await fetch("/api/meta");
+    meta = await r.json();
+  } catch(e){ meta = {}; }
+  var v = {};
+  try {
+    var r2 = await fetch("/assets/version.json");
+    v = await r2.json();
+  } catch(e){ v = {}; }
+
+  var el = document.getElementById("footer");
   if (!el) return;
-  el.classList.add('site-footer');
-  el.innerHTML = `
-    <div class="left">&copy; 2025</div>
-    <div class="right">
-      <span class="version-badge">{v.version || meta.release || 'dev'}</span>
-      &nbsp;|&nbsp; <span class="powered-by">{powered}</span>
-      &nbsp;|&nbsp; <a href="{meta.repository_url || '#'}" target="_blank" rel="noopener">Repository</a>
-    </div>`;
+  el.classList.add("site-footer");
+  var version = esc(v.version || meta.release || "dev");
+  var repo = esc(meta.repository_url || "#");
+  var powered = esc(meta.powered_by || "");
+  el.innerHTML = [
+    '<div class="left">&copy; 2025</div>',
+    '<div class="right">',
+    '  <span class="version-badge">', version, '</span>',
+    powered ? ' &nbsp;|&nbsp; <span class="powered-by">Powered by '+powered+'</span>' : '',
+    ' &nbsp;|&nbsp; <a href="', repo, '" target="_blank" rel="noopener">Repository</a>',
+    '</div>'
+  ].join("");
 })();
