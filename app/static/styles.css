@@ -54,3 +54,5 @@ th{font-variant:all-small-caps;letter-spacing:.04em;color:var(--muted)}
 .version-badge{font-weight:600}
 /* Responsive tweak for mobile spacing */
 @media(max-width:600px){ header, .subheader{padding:10px} .container{padding:10px} }
+
+.subnav{display:flex;gap:8px;margin:12px 0} .subnav a{padding:6px 10px;border:1px solid var(--border);border-radius:8px;text-decoration:none;color:var(--text)} .subnav a.active{background:var(--panel)}

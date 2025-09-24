@@ -18,3 +18,11 @@ class Task(Base):
     next_due_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+from sqlalchemy import Column, String
+
+class MetaKV(Base):
+    __tablename__ = "meta"
+    key = Column(String(100), primary_key=True)
+    value = Column(String(2000), nullable=True)

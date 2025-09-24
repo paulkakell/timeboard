@@ -6,20 +6,12 @@
 <link rel="stylesheet" href="/static/styles.css"/>
 <script defer src="/static/header.js"></script>
 </head><body>
-<header>
-  <div class="brand"><a href="/">Timeboard</a></div>
-  <nav>
-    <a href="/">Dashboard</a>
-    <a href="/new">New Task</a>
-    <a href="/about" class="active">About</a>
-  </nav>
-</header>
+<header id="header"></header>
 <div class="container">
   <div class="card">
-    <h1>About Timeboard</h1>
+    <h2>About</h2>
     <p id="summary"></p>
-    <p>Repository: <a href="https://github.com/paulkakell/timeboard" target="_blank">github.com/paulkakell/timeboard</a></p>
-    <h2>Versions</h2>
+    <h3>Changes</h3>
     <ul id="versions"></ul>
   </div>
 </div>
@@ -32,9 +24,6 @@ async function loadVersion(){
     document.getElementById('summary').textContent = v.summary || '';
     const ul = document.getElementById('versions');
     ul.innerHTML = (v.changes||[]).map(c=>'<li>'+c+'</li>').join('');
-    // footer
-    const f = document.getElementById('footer');
-    f.innerHTML = '<a href="https://github.com/paulkakell/timeboard" target="_blank">'+(v.version||'dev')+'</a>';
   }catch(e){}
 }
 loadVersion();

@@ -6,16 +6,12 @@
 <link rel="stylesheet" href="/static/styles.css"/>
 <script defer src="/static/header.js"></script>
 </head><body>
-<header>
-  <div class="brand"><a href="/">Timeboard</a></div>
-  <nav>
-    <a href="/" class="active">Dashboard</a>
-    <a href="/new">New Task</a>
-    <a href="/about">About</a>
-  </nav>
-  <input id="search" placeholder="Search name:foo type:bar tag:baz"/>
-</header>
+<header id="header"></header>
 <div class="container">
+  <div class="toolbar">
+    <input id="search" placeholder="Search name:foo type:bar tag:baz"/>
+    <a class="btn primary" href="/new">New Task</a>
+  </div>
   <div class="card">
     <table class="table" id="taskTable">
       <thead><tr>

@@ -1,0 +1,9 @@
+{
+  "version": "1.3.0",
+  "summary": "unknown",
+  "changes": [
+    "Feature: Admin sub nav with Documentation default and Database page. Full auto-generated site documentation.",
+    "Feature: Admin page with DB details, export/import, and one-click schema upgrade. Optional ADMIN_TOKEN protection."
+  ],
+  "date": "2025-09-24"
+}

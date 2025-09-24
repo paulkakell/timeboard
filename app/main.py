@@ -1,264 +1,213 @@
-from fastapi import FastAPI, Depends, HTTPException, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, HttpUrl
-from typing import Optional, List, Literal, Any
-from datetime import datetime, timedelta
-from croniter import croniter
-from sqlalchemy.orm import Session
-from sqlalchemy import select
-import json, os
-from pathlib import Path
-from zoneinfo import ZoneInfo
+<will be replaced>
 
-from .db import Base, engine, get_db
-from .models import Task
+def require_admin(request: Request):
+    if not ADMIN_TOKEN:
+        return
+    provided = request.headers.get("X-Admin-Token") or request.query_params.get("token")
+    if provided != ADMIN_TOKEN:
+        raise HTTPException(401, "admin token required")
 
-Base.metadata.create_all(bind=engine)
-
-# env
-TZ = os.getenv("TIMEBOARD_TZ", "UTC")
-RELEASE_VERSION = os.getenv("RELEASE_VERSION", "dev")
-REPOSITORY_URL = os.getenv("REPOSITORY_URL", "https://github.com/owner/repo")
-
-def parse_due_str(s: Optional[str], tz: str) -> Optional[datetime]:
-    if not s:
-        return None
-    s = s.strip()
-    # Support "YYYY-MM-DD HH:MM:SS" and "YY-MM-DD HH:MM:SS"
-    try:
-        if len(s.split()[0].split("-")[0]) == 2:
-            # YY-MM-DD
-            dt = datetime.strptime(s, "%y-%m-%d %H:%M:%S")
-            year = 2000 + dt.year  # naive mapping 00..99 -> 2000..2099
-            dt = dt.replace(year=year)
-        else:
-            dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Use 24h format: YYYY-MM-DD HH:MM:SS")
-    # interpret in user tz, then convert to UTC for storage
-    tzinfo = ZoneInfo(tz)
-    local = dt.replace(tzinfo=tzinfo)
-    return local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-
-def to_user_tz(dt: Optional[datetime], tz: str) -> Optional[str]:
-    if not dt:
-        return None
-    local = dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(tz))
-    return local.strftime("%Y-%m-%d %H:%M:%S")
-
-def compute_next_due_after(params: dict, from_dt: datetime) -> datetime:
-    unit = params.get("unit", "days")
-    interval = int(params.get("interval", 1))
-    if unit == "minutes":
-        return from_dt + timedelta(minutes=interval)
-    if unit == "hours":
-        return from_dt + timedelta(hours=interval)
-    if unit == "days":
-        return from_dt + timedelta(days=interval)
-    if unit == "weeks":
-        return from_dt + timedelta(weeks=interval)
-    if unit == "months":
-        # naive month add: 30 days per month
-        return from_dt + timedelta(days=30*interval)
-    if unit == "years":
-        return from_dt + timedelta(days=365*interval)
-    return from_dt + timedelta(days=interval)
-
-def compute_next_due(task: Task, now: datetime) -> Optional[datetime]:
-    mode = task.recurrence_mode
-    params = json.loads(task.recurrence_params) if task.recurrence_params else {}
-    if mode == "none":
-        return task.due_at
-    if mode == "after":
-        base = task.last_completed_at or now
-        return compute_next_due_after(params, base)
-    if mode == "cron":
-        expr = params.get("cron", "* * * * *")
-        tz = params.get("tz") or TZ
-        tzinfo = ZoneInfo(tz)
-        # Use last_completed or now as base
-        base_local = (task.last_completed_at or now).replace(tzinfo=ZoneInfo("UTC")).astimezone(tzinfo)
-        it = croniter(expr, base_local)
-        next_local = it.get_next(datetime)
-        next_utc = next_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-        return next_utc
-    if mode == "set":
-        # explicit list of datetimes in user tz
-        items = params.get("times", [])
-        tz = params.get("tz") or TZ
-        candidates = []
-        for s in items:
+def db_file_info():
+    url = str(engine.url)
+    if engine.dialect.name == "sqlite":
+        path = engine.url.database
+        if path and path != ":memory:" and os.path.exists(path):
             try:
-                dt = parse_due_str(s, tz)
-                if dt and dt > now:
-                    candidates.append(dt)
-            except HTTPException:
-                continue
-        return min(candidates) if candidates else None
-    return None
+                size = os.path.getsize(path)
+            except Exception:
+                size = None
+            return {"type":"sqlite","path":path,"size_bytes":size}
+        return {"type":"sqlite","path":engine.url.database,"size_bytes":None}
+    if engine.dialect.name.startswith("postgres"):
+        with engine.begin() as conn:
+            try:
+                sz = conn.execute(text("SELECT pg_database_size(current_database())")).scalar()
+            except Exception:
+                sz = None
+        return {"type":"postgres","size_bytes":int(sz) if sz is not None else None}
+    if engine.dialect.name.startswith("mysql"):
+        with engine.begin() as conn:
+            try:
+                sz = conn.execute(text("SELECT SUM(data_length + index_length) FROM information_schema.tables WHERE table_schema = DATABASE()")).scalar()
+            except Exception:
+                sz = None
+        return {"type":"mysql","size_bytes":int(sz) if sz is not None else None}
+    return {"type":engine.dialect.name,"size_bytes":None}
 
-class TaskIn(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    type: Optional[str] = None
-    subtype: Optional[str] = None
-    url: Optional[HttpUrl] = None
-    description: Optional[str] = None
-    tags: Optional[List[str]] = None
-    recurrence_mode: Literal["none","after","cron","set"]
-    due_at: Optional[str] = None
-    recurrence_params: Optional[dict] = None
+def get_db_version_conn(conn) -> int:
+    try:
+        cur = conn.execute(text("SELECT value FROM meta WHERE key='db_version'"))
+        row = cur.first()
+        if row and row[0]:
+            return int(row[0])
+    except Exception:
+        pass
+    try:
+        cols = {c['name'] for c in inspect(conn).get_columns('tasks')}
+        if 'last_done_at' in cols and 'created_at' in cols and 'updated_at' in cols:
+            return 2
+    except Exception:
+        pass
+    return 1
 
-class TaskOut(BaseModel):
-    id: int
-    name: str
-    type: Optional[str]
-    subtype: Optional[str]
-    url: Optional[str]
-    description: Optional[str]
-    tags: List[str] = []
-    recurrence_mode: str
-    recurrence_params: dict = {}
-    due_at: Optional[str] = None
-    last_completed_at: Optional[str] = None
-    next_due_at: Optional[str] = None
-    time_left_ms: Optional[int] = None
-    created_at: str
-    updated_at: str
+def set_db_version_conn(conn, v: int):
+    try:
+        cur = conn.execute(text("SELECT 1 FROM meta WHERE key='db_version'"))
+        if cur.first():
+            conn.execute(text("UPDATE meta SET value=:v WHERE key='db_version'"), {"v": str(v)})
+        else:
+            conn.execute(text("INSERT INTO meta(key,value) VALUES('db_version', :v)"), {"v": str(v)})
+    except Exception:
+        pass
 
-    @staticmethod
-    def from_model(t: Task, tz: str) -> "TaskOut":
-        now = datetime.utcnow()
-        due = to_user_tz(t.due_at, tz)
-        next_due = to_user_tz(t.next_due_at, tz)
-        last = to_user_tz(t.last_completed_at, tz)
-        tl = None
-        if t.next_due_at:
-            delta = t.next_due_at - now
-            tl = int(delta.total_seconds()*1000)
-        return TaskOut(
-            id=t.id,
-            name=t.name,
-            type=t.type,
-            subtype=t.subtype,
-            url=t.url,
-            description=t.description,
-            tags=[x for x in (t.tags or "").split(",") if x],
-            recurrence_mode=t.recurrence_mode,
-            recurrence_params=json.loads(t.recurrence_params) if t.recurrence_params else {},
-            due_at=due,
-            last_completed_at=last,
-            next_due_at=next_due,
-            time_left_ms=tl,
-            created_at=to_user_tz(t.created_at, tz) or "",
-            updated_at=to_user_tz(t.updated_at, tz) or "",
-        )
+def migrate_to_required():
+    with engine.begin() as conn:
+        current = get_db_version_conn(conn)
+        if current >= REQUIRED_DB_VERSION:
+            return {"migrated": False, "from": current, "to": current}
+        if current < 2:
+            dialect = conn.dialect.name
+            def coltype():
+                return "TEXT" if dialect == "sqlite" else "TIMESTAMPTZ"
+            try:
+                conn.execute(text(f"ALTER TABLE tasks ADD COLUMN IF NOT EXISTS last_done_at {coltype()}"))
+            except Exception:
+                conn.execute(text(f"ALTER TABLE tasks ADD COLUMN last_done_at {coltype()}"))
+            default_sql = "DEFAULT (CURRENT_TIMESTAMP)" if dialect == "sqlite" else "DEFAULT NOW()"
+            try:
+                conn.execute(text(f"ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_at {coltype()} {default_sql}"))
+            except Exception:
+                conn.execute(text(f"ALTER TABLE tasks ADD COLUMN created_at {coltype()} {default_sql}"))
+            try:
+                conn.execute(text(f"ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at {coltype()}"))
+            except Exception:
+                conn.execute(text(f"ALTER TABLE tasks ADD COLUMN updated_at {coltype()}"))
+            set_db_version_conn(conn, 2)
+            current = 2
+        return {"migrated": True, "from": current, "to": REQUIRED_DB_VERSION}
 
-app = FastAPI()
 
-app.mount("/static", StaticFiles(directory=str((Path(__file__).parent / "static").resolve())), name="static")
-app.mount("/assets", StaticFiles(directory=str((Path(__file__).parent / "assets").resolve())), name="assets")
+@app.get("/admin", response_class=FileResponse)
+def admin_page():
+    return FileResponse(STATIC_DIR / "admin.html")
 
-from pathlib import Path
-STATIC_DIR = Path(__file__).parent / "static"
+@app.get("/api/admin/info")
+def admin_info(request: Request):
+    require_admin(request)
+    info = db_file_info()
+    with engine.begin() as conn:
+        cur = get_db_version_conn(conn)
+    obsolete = cur < REQUIRED_DB_VERSION
+    return {
+        "dialect": engine.dialect.name,
+        "db_url": str(engine.url).split('@')[-1],
+        "size_bytes": info.get("size_bytes"),
+        "sqlite_file": info.get("path") if info.get("type") == "sqlite" else None,
+        "current_version": cur,
+        "required_version": REQUIRED_DB_VERSION,
+        "obsolete": obsolete
+    }
 
-@app.get("/")
-def index():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+@app.post("/api/admin/upgrade")
+def admin_upgrade(request: Request):
+    require_admin(request)
+    return migrate_to_required()
 
-@app.get("/new")
-def new_page():
-    return FileResponse(str(STATIC_DIR / "new.html"))
+@app.get("/api/admin/export/json")
+def export_json(request: Request):
+    require_admin(request)
+    with engine.begin() as conn:
+        rows = list(conn.execute(text("SELECT id,name,type,subtype,url,description,tags,recurrence_mode,recurrence_params,due_at,next_due_at,last_done_at,created_at,updated_at FROM tasks")))
+        tasks = []
+        for r in rows:
+            tasks.append({k: r[i].isoformat() if hasattr(r[i], 'isoformat') and r[i] is not None else r[i]
+                          for i, k in enumerate(["id","name","type","subtype","url","description","tags","recurrence_mode","recurrence_params","due_at","next_due_at","last_done_at","created_at","updated_at"])})
+        try:
+            meta = list(conn.execute(text("SELECT key,value FROM meta")))
+            meta = [{"key": k, "value": v} for (k, v) in meta]
+        except Exception:
+            meta = []
+        payload = {
+            "exported_at": datetime.utcnow().isoformat()+"Z",
+            "dialect": engine.dialect.name,
+            "current_version": get_db_version_conn(conn),
+            "required_version": REQUIRED_DB_VERSION,
+            "tasks": tasks,
+            "meta": meta
+        }
+    buf = io.BytesIO(json.dumps(payload, separators=(",",":")).encode("utf-8"))
+    return StreamingResponse(buf, media_type="application/json", headers={"Content-Disposition":"attachment; filename=timeboard-export.json"})
 
-@app.get("/about")
-def about_page():
-    return FileResponse(str(STATIC_DIR / "about.html"))
+@app.get("/api/admin/export/sqlite")
+def export_sqlite(request: Request):
+    require_admin(request)
+    info = db_file_info()
+    if info.get("type") != "sqlite" or not info.get("path") or not os.path.exists(info["path"]):
+        raise HTTPException(400, "Not a file-based SQLite database")
+    return FileResponse(info["path"], filename="timeboard.db")
 
-@app.get("/api/meta")
-def meta():
-    return {"tz": TZ, "release": RELEASE_VERSION, "repository_url": REPOSITORY_URL, "powered_by": os.getenv("POWERED_BY", "")}
+@app.post("/api/admin/import/json")
+async def import_json(request: Request):
+    require_admin(request)
+    replace = request.query_params.get("replace") in {"1","true","yes"}
+    try:
+        body = await request.body()
+        data = json.loads(body.decode("utf-8"))
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+    if not isinstance(data, dict) or "tasks" not in data:
+        raise HTTPException(400, "Invalid export format")
+    tasks = data.get("tasks") or []
+    meta = data.get("meta") or []
+    with engine.begin() as conn:
+        if replace:
+            try:
+                conn.execute(text("DELETE FROM tasks"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("DELETE FROM meta"))
+            except Exception:
+                pass
+        for m in meta:
+            k = m.get("key"); v = m.get("value")
+            if not k: continue
+            try:
+                conn.execute(text("INSERT INTO meta(key,value) VALUES(:k,:v) ON CONFLICT(key) DO UPDATE SET value=excluded.value")), {"k":k,"v":v}
+            except Exception:
+                try:
+                    exists = conn.execute(text("SELECT 1 FROM meta WHERE key=:k"), {"k":k}).first()
+                    if exists:
+                        conn.execute(text("UPDATE meta SET value=:v WHERE key=:k"), {"k":k,"v":v})
+                    else:
+                        conn.execute(text("INSERT INTO meta(key,value) VALUES(:k,:v)"), {"k":k,"v":v})
+                except Exception:
+                    pass
+        for t in tasks:
+            fields = ["id","name","type","subtype","url","description","tags","recurrence_mode","recurrence_params","due_at","next_due_at","last_done_at","created_at","updated_at"]
+            vals = {k: t.get(k) for k in fields}
+            for k in ["due_at","next_due_at","last_done_at","created_at","updated_at"]:
+                if vals.get(k):
+                    try:
+                        vals[k] = datetime.fromisoformat(vals[k].replace("Z","+00:00"))
+                    except Exception:
+                        vals[k] = None
+            cols = ",".join([k for k in fields if vals.get(k) is not None and k != "id"])
+            params = {k: v for k,v in vals.items() if v is not None and k != "id"}
+            if replace and vals.get("id") is not None:
+                cols = "id," + cols
+                params["id"] = vals["id"]
+            placeholders = ",".join([f":{k}" for k in params.keys()])
+            try:
+                conn.execute(text(f"INSERT INTO tasks ({cols}) VALUES ({placeholders})"), params)
+            except Exception:
+                conn.execute(text("INSERT INTO tasks (name,recurrence_mode) VALUES (:name,:mode)"), {"name": vals.get("name") or "Imported", "mode": vals.get("recurrence_mode") or "none"})
+    return {"status":"ok"}
 
-@app.get("/api/tasks", response_model=List[TaskOut])
-def list_tasks(db: Session = Depends(get_db)):
-    tz = TZ
-    stmt = select(Task).order_by(Task.next_due_at.is_(None), Task.next_due_at.asc(), Task.id.asc())
-    rows = db.execute(stmt).scalars().all()
-    return [TaskOut.from_model(t, tz) for t in rows]
+@app.get("/admin/docs", response_class=FileResponse)
+def admin_docs_page_alias():
+    return FileResponse(STATIC_DIR / "admin_docs.html")
 
-@app.post("/api/tasks", response_model=TaskOut)
-def create_task(payload: TaskIn, db: Session = Depends(get_db)):
-    tz = TZ
-    tags = ",".join(payload.tags or [])
-    due_at = parse_due_str(payload.due_at, tz) if payload.recurrence_mode == "none" else None
-    rec_params = payload.recurrence_params or {}
-    # write default tz into recurrence params when helpful
-    if payload.recurrence_mode in ("cron","set") and not rec_params.get("tz"):
-        rec_params["tz"] = tz
-    t = Task(
-        name=payload.name.strip(),
-        type=(payload.type or "").strip() or None,
-        subtype=(payload.subtype or "").strip() or None,
-        url=str(payload.url) if payload.url else None,
-        description=payload.description or None,
-        tags=tags,
-        recurrence_mode=payload.recurrence_mode,
-        recurrence_params=json.dumps(rec_params),
-        due_at=due_at,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
-    # precompute next_due_at
-    t.next_due_at = compute_next_due(t, datetime.utcnow())
-    db.add(t)
-    db.commit()
-    db.refresh(t)
-    return TaskOut.from_model(t, tz)
-
-@app.put("/api/tasks/{task_id}", response_model=TaskOut)
-def update_task(task_id: int, payload: TaskIn, db: Session = Depends(get_db)):
-    tz = TZ
-    t = db.get(Task, task_id)
-    if not t:
-        raise HTTPException(status_code=404, detail="Task not found")
-    t.name = payload.name.strip()
-    t.type = (payload.type or "").strip() or None
-    t.subtype = (payload.subtype or "").strip() or None
-    t.url = str(payload.url) if payload.url else None
-    t.description = payload.description or None
-    t.tags = ",".join(payload.tags or [])
-    t.recurrence_mode = payload.recurrence_mode
-    t.recurrence_params = json.dumps(payload.recurrence_params or {})
-    t.due_at = parse_due_str(payload.due_at, tz) if payload.recurrence_mode == "none" else None
-    t.updated_at = datetime.utcnow()
-    t.next_due_at = compute_next_due(t, datetime.utcnow())
-    db.commit()
-    db.refresh(t)
-    return TaskOut.from_model(t, tz)
-
-@app.post("/api/tasks/{task_id}/advance")
-def advance(task_id: int, db: Session = Depends(get_db)):
-    t = db.get(Task, task_id)
-    if not t:
-        raise HTTPException(status_code=404, detail="Task not found")
-    now = datetime.utcnow()
-    t.last_completed_at = now
-    t.next_due_at = compute_next_due(t, now)
-    t.updated_at = now
-    db.commit()
-    return {"status": "advanced", "next_due_at": to_user_tz(t.next_due_at, TZ)}
-
-@app.delete("/api/tasks/{task_id}")
-def delete_task(task_id: int, db: Session = Depends(get_db)):
-    t = db.get(Task, task_id)
-    if not t:
-        raise HTTPException(status_code=404, detail="Task not found")
-    db.delete(t)
-    db.commit()
-    return {"status": "deleted"}
-
-@app.get("/api/tasks/{task_id}", response_model=TaskOut)
-def get_task(task_id: int, db: Session = Depends(get_db)):
-    row = db.get(Task, task_id)
-    if not row:
-        raise HTTPException(404, "Not found")
-    return TaskOut.from_orm(row)
+@app.get("/admin/db", response_class=FileResponse)
+def admin_db_page():
+    return FileResponse(STATIC_DIR / "admin_db.html")

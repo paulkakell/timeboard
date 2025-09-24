@@ -92,7 +92,7 @@ async function loadForEdit(id){
   showMode(modeSel.value);
   if (t.recurrence_mode === "none"){
     const due = t.due_at || "";
-    form.querySelector('[name="due"]').value = due.replace("T"," ").slice(0,19);
+    form.querySelector('[name="due"]').value = due?.replace("T"," ").slice(0,19);
   } else if (t.recurrence_mode === "after"){
     const p = t.recurrence_params||{};
     form.querySelector('[name="interval"]').value = p.interval||1;

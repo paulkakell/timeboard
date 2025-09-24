@@ -14,6 +14,7 @@
       '  <a href="/" data-path="/">Dashboard</a>',
       '  <a href="/new" data-path="/new">New Task</a>',
       '  <a href="/about" data-path="/about">About</a>',
+          '  <a href="/admin" data-path="/admin">Admin</a>',
       '</nav>'
     ].join("");
     hdr.innerHTML = html;
