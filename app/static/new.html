@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>New Task</title>
+<link rel="stylesheet" href="/static/styles.css"/>
+</head><body>
+<header>
+  <nav>
+    <a href="/">Dashboard</a>
+    <a href="/new" class="active">New Task</a>
+  </nav>
+</header>
+<div class="container">
+  <form class="card grid two" id="taskForm">
+    <div>
+      <label>Name</label>
+      <input name="name" required maxlength="200"/>
+    </div>
+    <div>
+      <label>Type</label>
+      <input name="type"/>
+    </div>
+    <div>
+      <label>Subtype</label>
+      <input name="subtype"/>
+    </div>
+    <div>
+      <label>URL</label>
+      <input name="url" type="url" placeholder="https://..."/>
+    </div>
+    <div class="grid two" style="grid-column:1/-1">
+      <div>
+        <label>Tags (comma separated)</label>
+        <input name="tags" placeholder="ops,backup,infra"/>
+      </div>
+      <div>
+        <label>Recurrence mode</label>
+        <select name="recurrence_mode" id="modeSel">
+          <option value="none">One time</option>
+          <option value="after">After</option>
+          <option value="cron">Cron</option>
+          <option value="set">Set</option>
+        </select>
+      </div>
+    </div>
+    <div id="modeNone" class="grid two" style="grid-column:1/-1">
+      <div>
+        <label>Due at <span id="tzLabel"></span> (24h YYYY-MM-DD HH:MM:SS)</label>
+        <input name="due_at" placeholder="2025-10-01 22:00:00"/>
+      </div>
+    </div>
+    <div id="modeAfter" class="grid three" style="grid-column:1/-1;display:none">
+      <div>
+        <label>Interval</label>
+        <input name="interval" type="number" value="1" min="1"/>
+      </div>
+      <div>
+        <label>Unit</label>
+        <select name="unit">
+          <option>minutes</option><option>hours</option><option>days</option><option>weeks</option><option>months</option><option>years</option>
+        </select>
+      </div>
+      <div></div>
+    </div>
+    <div id="modeCron" class="grid two" style="grid-column:1/-1;display:none">
+      <div>
+        <label>Cron expression</label>
+        <input name="cron" placeholder="0 9 * * MON-FRI"/>
+      </div>
+      <div>
+        <label>Time zone</label>
+        <input name="tz" id="cronTz"/>
+      </div>
+    </div>
+    <div id="modeSet" class="grid two" style="grid-column:1/-1;display:none">
+      <div style="grid-column:1/-1">
+        <label>Set times one per line in 24h, YYYY-MM-DD HH:MM:SS</label>
+        <textarea name="times" rows="4" placeholder="2025-10-01 22:00:00&#10;2025-12-01 08:30:00"></textarea>
+      </div>
+    </div>
+    <div style="grid-column:1/-1">
+      <label>Description</label>
+      <textarea name="description" rows="3"></textarea>
+    </div>
+    <div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn" type="reset">Reset</button>
+      <button class="btn primary" type="submit">Create</button>
+    </div>
+    <div id="msg" style="grid-column:1/-1;color:#9aa3b2"></div>
+  </form>
+</div>
+<div class="footer" id="footer"></div>
+<script src="/static/new.js"></script>
+</body></html>
