@@ -21,3 +21,23 @@ th,td{border-bottom:1px solid var(--border);padding:10px;text-align:left}
 .footer{position:fixed;left:10px;bottom:10px;color:var(--muted);font-size:12px}
 .footer a{color:var(--muted);text-decoration:underline}
 @media(max-width:900px){.grid.two,.grid.three{grid-template-columns:1fr}}
+
+
+/* Brand and nav styling */
+header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.brand a{font-weight:700;font-size:18px;color:var(--text);text-decoration:none;padding:6px 8px;border-radius:8px}
+nav{display:flex;gap:8px;flex-wrap:wrap}
+nav a{font-variant:all-small-caps;letter-spacing:.04em;border-bottom:2px solid transparent}
+nav a:hover{border-bottom-color:var(--primary)}
+th{font-variant:all-small-caps;letter-spacing:.04em;color:var(--muted)}
+
+/* Footer bottom-right small text */
+.footer{position:fixed;right:10px;left:auto;bottom:10px;font-size:12px}
+
+/* Table horizontal scroll on small screens */
+.card{overflow-x:auto}
+@media(max-width:600px){
+  header input{width:100%}
+  .container{padding:12px}
+  td,th{padding:8px}
+}

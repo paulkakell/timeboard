@@ -65,6 +65,11 @@ async function refresh(){
   const rows = await listTasks();
   const groups = searchParse(searchEl.value||'');
   const filtered = rows.filter(r=>matches(r, groups));
+  filtered.sort((a,b)=>{
+    const ax = a.next_due_at||a.due_at||'';
+    const bx = b.next_due_at||b.due_at||'';
+    return String(ax).localeCompare(String(bx));
+  });
   tbody.innerHTML = filtered.map(renderRow).join('');
 }
 refresh();

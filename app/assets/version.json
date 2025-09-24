@@ -1,0 +1,13 @@
+{
+  "version": "v1.2.1",
+  "changes": [
+    "Responsive layout improvements for mobile",
+    "Footer shows version from assets/version.json with repository link",
+    "Re-added 'Timeboard' brand in header",
+    "Styled navigation links to match table headers",
+    "Dashboard rows sorted by Next due ascending",
+    "Auto-refresh every 10 minutes",
+    "Added About page with repo, summary, and version history"
+  ],
+  "summary": "Timeboard tracks recurring and one-off tasks with due times, search, and simple actions."
+}

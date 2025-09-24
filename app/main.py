@@ -157,6 +157,7 @@ class TaskOut(BaseModel):
 app = FastAPI()
 
 app.mount("/static", StaticFiles(directory=str((Path(__file__).parent / "static").resolve())), name="static")
+app.mount("/assets", StaticFiles(directory=str((Path(__file__).parent / "assets").resolve())), name="assets")
 
 from pathlib import Path
 STATIC_DIR = Path(__file__).parent / "static"
@@ -168,6 +169,10 @@ def index():
 @app.get("/new")
 def new_page():
     return FileResponse(str(STATIC_DIR / "new.html"))
+
+@app.get("/about")
+def about_page():
+    return FileResponse(str(STATIC_DIR / "about.html"))
 
 @app.get("/api/meta")
 def meta():
