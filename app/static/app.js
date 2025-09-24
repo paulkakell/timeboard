@@ -1,96 +1,113 @@
 const API = "/api/tasks";
 let meta = { tz: "UTC", release: "dev", repository_url: "#" };
 
-async function getMeta(){ const r = await fetch('/api/meta'); meta = await r.json(); document.getElementById('footer').innerHTML = `v${meta.release} · <a href="${meta.repository_url}" target="_blank">repo</a>`; }
+async function getMeta(){
+  try { const r = await fetch("/api/meta"); meta = await r.json(); } catch(e){}
+}
 getMeta();
 
-const searchEl = document.getElementById('search');
-const tbody = document.getElementById('taskBody');
+const searchEl = document.getElementById("search");
+const tbody = document.getElementById("taskBody");
 
-function searchParse(q){
-  const tokens = q.trim().split(/\s+/).filter(Boolean);
-  const groups = [];
-  let cur = [];
-  function push(tok){
-    const m = tok.match(/^(\w+):(.*)$/i);
-    if (m) cur.push({field:m[1].toLowerCase(), value:m[2].toLowerCase()});
-    else cur.push({field:'*', value:tok.toLowerCase()});
-  }
-  for (const t of tokens){
-    if (t.toUpperCase()==='OR'){ if(cur.length){groups.push({terms:cur}); cur=[];} continue; }
-    if (t.toUpperCase()==='AND'){ if(cur.length){groups.push({terms:cur}); cur=[];} continue; }
-    push(t);
-  }
-  if (cur.length) groups.push({terms:cur});
-  return groups;
+function esc(s){
+  return String(s||"").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function matches(task, groups){
-  if (!groups.length) return true;
-  return groups.every(g => g.terms.some(({field,value}) => {
-    if (field==='name') return task.name.toLowerCase().includes(value);
-    if (field==='type') return (task.type||'').toLowerCase().includes(value);
-    if (field==='tag' || field==='tags') return task.tags.join(',').toLowerCase().includes(value);
-    if (field==='*') return JSON.stringify(task).toLowerCase().includes(value);
-    return false;
-  }));
+function timeLeft(ms){
+  if (ms == null) return "";
+  if (ms < 0) return "past due";
+  const s = Math.floor(ms/1000);
+  const d = Math.floor(s/86400);
+  const h = Math.floor((s%86400)/3600);
+  const m = Math.floor((s%3600)/60);
+  const parts = [];
+  if (d) parts.push(d+"d");
+  if (h) parts.push(h+"h");
+  if (m || parts.length===0) parts.push(m+"m");
+  return parts.join(" ");
 }
 
-async function listTasks(){ const r = await fetch(API); if(!r.ok) throw new Error('Failed to load'); return r.json(); }
-async function advanceTask(id){ const r = await fetch(`${API}/${id}/advance`, {method:'POST'}); if(!r.ok) throw new Error('Advance failed'); return r.json(); }
-async function deleteTask(id){ const r = await fetch(`${API}/${id}`, {method:'DELETE'}); if(!r.ok) throw new Error('Delete failed'); return r.json(); }
-
-function renderRow(t){
-  const tags = t.tags.map(x=>`<span class='badge'>${x}</span>`).join('');
-  let tl = '';
-  if (t.time_left_ms != null){
-    const s = Math.max(0, Math.floor(t.time_left_ms/1000));
-    const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60);
-    tl = `${d}d ${h}h ${m}m`;
+function render(rows){
+  tbody.innerHTML = "";
+  for (const t of rows){
+    const tr = document.createElement("tr");
+    const tags = (t.tags||[]).map(esc).join(", ");
+    tr.innerHTML = `
+      <td>${esc(t.name||"")}</td>
+      <td>${esc([t.type,t.subtype].filter(Boolean).join(" / "))}</td>
+      <td>${tags}</td>
+      <td>${esc(t.next_due_at||t.due_at||"")}</td>
+      <td>${esc(timeLeft(t.time_left_ms))}</td>
+      <td>
+        <button class="btn" data-act="edit" data-id="${t.id}">Edit</button>
+        <button class="btn" data-act="advance" data-id="${t.id}">Advance</button>
+        <button class="btn danger" data-act="delete" data-id="${t.id}">Delete</button>
+      </td>`;
+    tbody.appendChild(tr);
   }
-  return `<tr>
-    <td>${t.name}</td>
-    <td>${t.type||''}</td>
-    <td>${tags}</td>
-    <td>${t.next_due_at||t.due_at||''}</td>
-    <td>${tl}</td>
-    <td>
-      <button class='btn' data-act='advance' data-id='${t.id}'>Advance</button>
-      <button class='btn danger' data-act='delete' data-id='${t.id}'>Delete</button>
-    </td>
-  </tr>`;
+}
+
+async function fetchTasks(){
+  const r = await fetch(API);
+  if (!r.ok) throw new Error("list failed");
+  return await r.json();
+}
+
+function parseQuery(q){
+  const tokens = (q||"").trim().split(/\s+/).filter(Boolean);
+  const filters = [];
+  for (const tok of tokens){
+    const m = tok.match(/^(\w+):(.*)$/);
+    if (m) filters.push({field:m[1].toLowerCase(), value:m[2].toLowerCase()});
+    else filters.push({field:"name", value:tok.toLowerCase()});
+  }
+  return filters;
+}
+
+function matches(t, filters){
+  if (!filters.length) return true;
+  for (const f of filters){
+    let hay = "";
+    if (f.field==="name") hay = (t.name||"");
+    else if (f.field==="type") hay = (t.type||"") + " " + (t.subtype||"");
+    else if (f.field==="tag" || f.field==="tags") hay = (t.tags||[]).join(" ");
+    else hay = JSON.stringify(t||{});
+    if (!hay.toLowerCase().includes(f.value)) return false;
+  }
+  return true;
 }
 
 async function refresh(){
-  const rows = await listTasks();
-  const groups = searchParse(searchEl.value||'');
-  const filtered = rows.filter(r=>matches(r, groups));
-  filtered.sort((a,b)=>{
-    const ax = a.next_due_at||a.due_at||'';
-    const bx = b.next_due_at||b.due_at||'';
-    return String(ax).localeCompare(String(bx));
-  });
-  tbody.innerHTML = filtered.map(renderRow).join('');
+  const all = await fetchTasks();
+  const q = (searchEl && searchEl.value) ? searchEl.value : "";
+  const filters = parseQuery(q);
+  const rows = all.filter(t => matches(t, filters));
+  render(rows);
 }
-refresh();
-setInterval(refresh, 20000);
-searchEl.addEventListener('input', ()=>{ refresh(); });
-document.getElementById('taskTable').addEventListener('click', async (e)=>{
-  const btn = e.target.closest('button[data-act]');
-  if (!btn) return;
-  const id = btn.getAttribute('data-id');
-  const act = btn.getAttribute('data-act');
-  if (act==='advance'){ await advanceTask(id); await refresh(); }
-  if (act==='delete'){ if (confirm('Delete task?')) { await deleteTask(id); await refresh(); } }
-});
 
-document.addEventListener('click', (e)=>{
-  const btn = e.target.closest('button[data-act]');
+if (searchEl){
+  searchEl.addEventListener("input", ()=>{ refresh(); });
+}
+
+async function advanceTask(id){
+  await fetch(`/api/tasks/${id}/advance`, { method:"POST" });
+}
+async function deleteTask(id){
+  await fetch(`/api/tasks/${id}`, { method:"DELETE" });
+}
+
+document.addEventListener("click", async (e)=>{
+  const btn = e.target.closest("button[data-act]");
   if (!btn) return;
-  const act = btn.getAttribute('data-act');
-  const id = btn.getAttribute('data-id');
-  if (act==='edit'){ location.href = `/new?id=${id}`; return; }
-  if (act==='delete'){ if (!confirm('Delete this task?')) return;
-    fetch(`/api/tasks/${id}`, { method:'DELETE' }).then(()=>refresh());
+  const act = btn.getAttribute("data-act");
+  const id = btn.getAttribute("data-id");
+  if (act==="edit"){ location.href = `/new?id=${id}`; return; }
+  if (act==="advance"){ await advanceTask(id); await refresh(); return; }
+  if (act==="delete"){
+    if (!confirm("Delete this task?")) return;
+    await deleteTask(id);
+    await refresh();
   }
 });
+
+refresh();

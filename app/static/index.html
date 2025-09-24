@@ -6,26 +6,22 @@
 <link rel="stylesheet" href="/static/styles.css"/>
 <script defer src="/static/header.js"></script>
 </head><body>
-<header>
-  <div class="brand"><a href="/">Timeboard</a></div>
-  <nav>
-    <a href="/" class="active">Dashboard</a>
-    <a href="/new">New Task</a>
-    <a href="/about">About</a>
-  </nav>
-  <input id="search" placeholder="Search name:foo type:bar tag:baz"/>
-</header>
+<header id="header"></header>
 <div class="container">
   <div class="card">
-    <table class="table" id="taskTable">
-      <thead><tr>
-        <th>Name</th><th>Type</th><th>Tags</th><th>Next due</th><th>Time left</th><th>Actions</th>
-      </tr></thead>
-      <tbody id="taskBody"></tbody>
-    </table>
+    <div class="grid two">
+      <div><input id="search" placeholder="Filter. Example: tag:home type:maintenance"/></div>
+      <div style="text-align:right"><a class="btn" href="/new">Create task</a></div>
+    </div>
+    <div style="overflow:auto;margin-top:12px">
+      <table>
+        <thead><tr><th>Name</th><th>Type</th><th>Tags</th><th>Next due</th><th>Time left</th><th>Actions</th></tr></thead>
+        <tbody id="taskBody"></tbody>
+      </table>
+    </div>
   </div>
+  <div id="footer"></div>
 </div>
-<div class="footer" id="footer"></div>
 <script src="/static/app.js"></script>
 <script src="/static/footer.js"></script>
 </body></html>

@@ -1,0 +1,15 @@
+Timeboard 1.1.1 – security hardening and full repo preserve
+
+* Fix: replace Pydantic v1 from_orm with v2-safe serializer and from_attributes
+* Fix: /api/tasks/{id} returns TaskOut without 500
+* Fix: rebuild corrupted files (main.py, models.py, static JS/HTML)
+* Security: TrustedHostMiddleware (ALLOWED_HOSTS), optional CORSMiddleware (CORS_ALLOW_ORIGINS)
+* Security: CSP, X-Frame-Options, Referrer-Policy, X-Content-Type-Options, optional HSTS
+* Security: request size guard (MAX_REQUEST_BYTES)
+* Security: escape HTML in table rendering to prevent XSS
+* Validation: field limits, tag sanitation, cron validation
+* Time: UTC storage with ZoneInfo; consistent next_due computation
+* API: add /healthz
+* DB: engine pool_pre_ping
+* UI: deterministic sorting, form improvements
+* Packaging: preserved all original files and .git; replaced only modified paths

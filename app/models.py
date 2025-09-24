@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime
-from datetime import datetime
+from sqlalchemy.sql import func
 from .db import Base
 
 class Task(Base):
@@ -12,9 +12,9 @@ class Task(Base):
     description = Column(Text, nullable=True)
     tags = Column(String(1000), nullable=True)  # comma separated
     recurrence_mode = Column(String(16), nullable=False)  # none | after | cron | set
-    recurrence_params = Column(Text, nullable=True)       # JSON in string
-    due_at = Column(DateTime, nullable=True)              # when mode == none
-    last_completed_at = Column(DateTime, nullable=True)
-    next_due_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    recurrence_params = Column(Text, nullable=True)       # JSON string
+    due_at = Column(DateTime(timezone=True), nullable=True)
+    next_due_at = Column(DateTime(timezone=True), nullable=True)
+    last_done_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

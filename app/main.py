@@ -1,264 +1,390 @@
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, HttpUrl
-from typing import Optional, List, Literal, Any
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, AnyUrl, field_validator
+from typing import Optional, List, Literal, Any, Dict
 from datetime import datetime, timedelta
-from croniter import croniter
+from croniter import croniter, CroniterBadCronError
 from sqlalchemy.orm import Session
 from sqlalchemy import select
+from zoneinfo import ZoneInfo
+from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 import json, os
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from .db import Base, engine, get_db
 from .models import Task
 
-Base.metadata.create_all(bind=engine)
+# ------------------ Settings ------------------
+def _split_env(name: str) -> List[str]:
+    val = os.getenv(name, "").strip()
+    if not val:
+        return []
+    return [p.strip() for p in val.split(",") if p.strip()]
 
-# env
-TZ = os.getenv("TIMEBOARD_TZ", "UTC")
-RELEASE_VERSION = os.getenv("RELEASE_VERSION", "dev")
-REPOSITORY_URL = os.getenv("REPOSITORY_URL", "https://github.com/owner/repo")
+ALLOWED_HOSTS = _split_env("ALLOWED_HOSTS") or ["*"]
+CORS_ALLOW_ORIGINS = _split_env("CORS_ALLOW_ORIGINS")
+ENABLE_HSTS = os.getenv("ENABLE_HSTS", "0") == "1"
+MAX_REQUEST_BYTES = int(os.getenv("MAX_REQUEST_BYTES", "65536"))  # 64 KiB
+DEFAULT_TZ = os.getenv("TIMEBOARD_TZ") or os.getenv("TZ") or "UTC"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-def parse_due_str(s: Optional[str], tz: str) -> Optional[datetime]:
-    if not s:
-        return None
-    s = s.strip()
-    # Support "YYYY-MM-DD HH:MM:SS" and "YY-MM-DD HH:MM:SS"
-    try:
-        if len(s.split()[0].split("-")[0]) == 2:
-            # YY-MM-DD
-            dt = datetime.strptime(s, "%y-%m-%d %H:%M:%S")
-            year = 2000 + dt.year  # naive mapping 00..99 -> 2000..2099
-            dt = dt.replace(year=year)
-        else:
-            dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Use 24h format: YYYY-MM-DD HH:MM:SS")
-    # interpret in user tz, then convert to UTC for storage
-    tzinfo = ZoneInfo(tz)
-    local = dt.replace(tzinfo=tzinfo)
-    return local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-
-def to_user_tz(dt: Optional[datetime], tz: str) -> Optional[str]:
-    if not dt:
-        return None
-    local = dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo(tz))
-    return local.strftime("%Y-%m-%d %H:%M:%S")
-
-def compute_next_due_after(params: dict, from_dt: datetime) -> datetime:
-    unit = params.get("unit", "days")
-    interval = int(params.get("interval", 1))
-    if unit == "minutes":
-        return from_dt + timedelta(minutes=interval)
-    if unit == "hours":
-        return from_dt + timedelta(hours=interval)
-    if unit == "days":
-        return from_dt + timedelta(days=interval)
-    if unit == "weeks":
-        return from_dt + timedelta(weeks=interval)
-    if unit == "months":
-        # naive month add: 30 days per month
-        return from_dt + timedelta(days=30*interval)
-    if unit == "years":
-        return from_dt + timedelta(days=365*interval)
-    return from_dt + timedelta(days=interval)
-
-def compute_next_due(task: Task, now: datetime) -> Optional[datetime]:
-    mode = task.recurrence_mode
-    params = json.loads(task.recurrence_params) if task.recurrence_params else {}
-    if mode == "none":
-        return task.due_at
-    if mode == "after":
-        base = task.last_completed_at or now
-        return compute_next_due_after(params, base)
-    if mode == "cron":
-        expr = params.get("cron", "* * * * *")
-        tz = params.get("tz") or TZ
-        tzinfo = ZoneInfo(tz)
-        # Use last_completed or now as base
-        base_local = (task.last_completed_at or now).replace(tzinfo=ZoneInfo("UTC")).astimezone(tzinfo)
-        it = croniter(expr, base_local)
-        next_local = it.get_next(datetime)
-        next_utc = next_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-        return next_utc
-    if mode == "set":
-        # explicit list of datetimes in user tz
-        items = params.get("times", [])
-        tz = params.get("tz") or TZ
-        candidates = []
-        for s in items:
-            try:
-                dt = parse_due_str(s, tz)
-                if dt and dt > now:
-                    candidates.append(dt)
-            except HTTPException:
-                continue
-        return min(candidates) if candidates else None
-    return None
-
+# ------------------ Schemas ------------------
 class TaskIn(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    type: Optional[str] = None
-    subtype: Optional[str] = None
-    url: Optional[HttpUrl] = None
-    description: Optional[str] = None
-    tags: Optional[List[str]] = None
+    name: str = Field(..., min_length=1, max_length=200)
+    type: Optional[str] = Field(None, max_length=100)
+    subtype: Optional[str] = Field(None, max_length=100)
+    url: Optional[AnyUrl] = None
+    description: Optional[str] = Field(None, max_length=8000)
+    tags: List[str] = Field(default_factory=list)
     recurrence_mode: Literal["none","after","cron","set"]
-    due_at: Optional[str] = None
-    recurrence_params: Optional[dict] = None
+    due_at: Optional[str] = None  # 'none' mode
+    recurrence_params: Optional[Dict[str, Any]] = None
+
+    @field_validator("tags")
+    @classmethod
+    def _clean_tags(cls, v: List[str]) -> List[str]:
+        out: List[str] = []
+        for s in v or []:
+            s = (s or "").strip()
+            if not s:
+                continue
+            if len(s) > 60:
+                s = s[:60]
+            out.append(s)
+            if len(out) >= 20:
+                break
+        return out
 
 class TaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
-    type: Optional[str]
-    subtype: Optional[str]
-    url: Optional[str]
-    description: Optional[str]
+    type: Optional[str] = None
+    subtype: Optional[str] = None
+    url: Optional[str] = None
+    description: Optional[str] = None
     tags: List[str] = []
     recurrence_mode: str
-    recurrence_params: dict = {}
+    recurrence_params: Optional[Dict[str, Any]] = None
     due_at: Optional[str] = None
-    last_completed_at: Optional[str] = None
     next_due_at: Optional[str] = None
     time_left_ms: Optional[int] = None
-    created_at: str
-    updated_at: str
 
-    @staticmethod
-    def from_model(t: Task, tz: str) -> "TaskOut":
-        now = datetime.utcnow()
-        due = to_user_tz(t.due_at, tz)
-        next_due = to_user_tz(t.next_due_at, tz)
-        last = to_user_tz(t.last_completed_at, tz)
+    @classmethod
+    def from_model(cls, t: Task, tz: ZoneInfo):
+        def dt_str(x):
+            if not x: return None
+            return x.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
+        tags = [s.strip() for s in (t.tags or "").split(",") if s.strip()]
+        try:
+            rp = json.loads(t.recurrence_params) if t.recurrence_params else None
+        except Exception:
+            rp = None
+        target = t.next_due_at or t.due_at
         tl = None
-        if t.next_due_at:
-            delta = t.next_due_at - now
-            tl = int(delta.total_seconds()*1000)
-        return TaskOut(
-            id=t.id,
-            name=t.name,
-            type=t.type,
-            subtype=t.subtype,
-            url=t.url,
-            description=t.description,
-            tags=[x for x in (t.tags or "").split(",") if x],
-            recurrence_mode=t.recurrence_mode,
-            recurrence_params=json.loads(t.recurrence_params) if t.recurrence_params else {},
-            due_at=due,
-            last_completed_at=last,
-            next_due_at=next_due,
-            time_left_ms=tl,
-            created_at=to_user_tz(t.created_at, tz) or "",
-            updated_at=to_user_tz(t.updated_at, tz) or "",
+        if target:
+            tl = int((target - datetime.now(ZoneInfo("UTC"))).total_seconds() * 1000)
+        return cls(
+            id=t.id, name=t.name, type=t.type, subtype=t.subtype, url=t.url,
+            description=t.description, tags=tags, recurrence_mode=t.recurrence_mode,
+            recurrence_params=rp, due_at=dt_str(t.due_at), next_due_at=dt_str(t.next_due_at),
+            time_left_ms=tl
         )
 
-app = FastAPI()
+# ------------------ App ------------------
+app = FastAPI(title="Timeboard API")
+Base.metadata.create_all(bind=engine)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-app.mount("/static", StaticFiles(directory=str((Path(__file__).parent / "static").resolve())), name="static")
-app.mount("/assets", StaticFiles(directory=str((Path(__file__).parent / "assets").resolve())), name="assets")
+# Security middlewares
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+if CORS_ALLOW_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ALLOW_ORIGINS,
+        allow_methods=["GET","POST","PUT","DELETE","OPTIONS"],
+        allow_headers=["*"],
+    )
 
-from pathlib import Path
-STATIC_DIR = Path(__file__).parent / "static"
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    # Basic request size guard
+    try:
+        clen = request.headers.get("content-length")
+        if clen and int(clen) > MAX_REQUEST_BYTES:
+            return JSONResponse({"detail":"Request too large"}, status_code=413)
+    except Exception:
+        pass
 
-@app.get("/")
+    resp = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "font-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+    resp.headers["Content-Security-Policy"] = os.getenv("SECURITY_CSP", csp)
+    if ENABLE_HSTS:
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return resp
+
+# Helpers
+def get_tz():
+    try:
+        return ZoneInfo(DEFAULT_TZ)
+    except Exception:
+        return ZoneInfo("UTC")
+
+def parse_due_str(s: Optional[str], tz: ZoneInfo):
+    if not s: return None
+    s = s.strip()
+    try:
+        if "T" in s or "Z" in s:
+            dt = datetime.fromisoformat(s.replace("Z","+00:00"))
+        else:
+            dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+            dt = dt.replace(tzinfo=tz)
+        return dt.astimezone(ZoneInfo("UTC"))
+    except Exception:
+        return None
+
+def validate_payload(pl: TaskIn):
+    # Validate mode-specific params
+    rp = pl.recurrence_params or {}
+    if pl.recurrence_mode == "none":
+        return
+    if pl.recurrence_mode == "after":
+        interval = int((rp or {}).get("interval", 1))
+        if interval <= 0 or interval > 10**6:
+            raise HTTPException(400, "Invalid interval")
+        unit = (rp or {}).get("unit", "days")
+        if unit not in {"minutes","hours","days","weeks","months","years"}:
+            raise HTTPException(400, "Invalid unit")
+    if pl.recurrence_mode == "cron":
+        expr = (rp or {}).get("cron") or ""
+        if not expr:
+            raise HTTPException(400, "Missing cron expression")
+        try:
+            croniter(expr, datetime.now())
+        except CroniterBadCronError:
+            raise HTTPException(400, "Invalid cron expression")
+    if pl.recurrence_mode == "set":
+        times = (rp or {}).get("times") or []
+        if not isinstance(times, list) or len(times) == 0:
+            raise HTTPException(400, "Missing times for set mode")
+
+def compute_next_due(mode: str, rp: Optional[Dict[str, Any]], due_at: Optional[datetime], now_utc: datetime):
+    tz = get_tz()
+    if mode == "none":
+        return due_at
+    if mode == "after":
+        interval = int((rp or {}).get("interval", 1))
+        unit = (rp or {}).get("unit", "days")
+        seconds = {
+            "minutes": 60,
+            "hours": 3600,
+            "days": 86400,
+            "weeks": 604800,
+            "months": 2592000,  # approx
+            "years": 31536000,
+        }.get(unit, 86400)
+        return now_utc + timedelta(seconds=interval * seconds)
+    if mode == "cron":
+        expr = (rp or {}).get("cron") or "* * * * *"
+        rtz = (rp or {}).get("tz") or "UTC"
+        try:
+            tzinfo = ZoneInfo(rtz)
+        except Exception:
+            tzinfo = ZoneInfo("UTC")
+        base_local = now_utc.astimezone(tzinfo).replace(second=0, microsecond=0)
+        it = croniter(expr, base_local)
+        nxt_local = it.get_next(datetime)
+        return nxt_local.astimezone(ZoneInfo("UTC"))
+    if mode == "set":
+        times = (rp or {}).get("times") or []
+        rtz = (rp or {}).get("tz") or "UTC"
+        try:
+            tzinfo = ZoneInfo(rtz)
+        except Exception:
+            tzinfo = ZoneInfo("UTC")
+        future = []
+        for s in times:
+            dt = parse_due_str(s, tzinfo)
+            if not dt:
+                continue
+            if dt > now_utc:
+                future.append(dt)
+        return min(future) if future else None
+    return None
+
+def serialize_rp(rp: Optional[Dict[str, Any]]):
+    return json.dumps(rp or {}, separators=(",",":"))
+
+# ------------------ Routes ------------------
+@app.get("/", response_class=FileResponse)
 def index():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    return FileResponse(STATIC_DIR / "index.html")
 
-@app.get("/new")
-def new_page():
-    return FileResponse(str(STATIC_DIR / "new.html"))
+@app.get("/new", response_class=FileResponse)
+def new_task_page():
+    return FileResponse(STATIC_DIR / "new.html")
 
-@app.get("/about")
+@app.get("/about", response_class=FileResponse)
 def about_page():
-    return FileResponse(str(STATIC_DIR / "about.html"))
+    return FileResponse(STATIC_DIR / "about.html")
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
 
 @app.get("/api/meta")
 def meta():
-    return {"tz": TZ, "release": RELEASE_VERSION, "repository_url": REPOSITORY_URL, "powered_by": os.getenv("POWERED_BY", "")}
+    repo = os.getenv("REPOSITORY_URL") or ""
+    release = os.getenv("RELEASE") or "dev"
+    return {"tz": str(get_tz().key), "repository_url": repo, "release": release, "powered_by": "FastAPI"}
 
 @app.get("/api/tasks", response_model=List[TaskOut])
 def list_tasks(db: Session = Depends(get_db)):
-    tz = TZ
-    stmt = select(Task).order_by(Task.next_due_at.is_(None), Task.next_due_at.asc(), Task.id.asc())
-    rows = db.execute(stmt).scalars().all()
-    return [TaskOut.from_model(t, tz) for t in rows]
+    rows = list(db.execute(select(Task)).scalars())
+    rows = sorted(rows, key=lambda t: ((t.next_due_at is None), t.next_due_at or datetime.max, t.id))
+    tz = get_tz()
+    return [TaskOut.from_model(r, tz) for r in rows]
 
 @app.post("/api/tasks", response_model=TaskOut)
 def create_task(payload: TaskIn, db: Session = Depends(get_db)):
-    tz = TZ
-    tags = ",".join(payload.tags or [])
-    due_at = parse_due_str(payload.due_at, tz) if payload.recurrence_mode == "none" else None
-    rec_params = payload.recurrence_params or {}
-    # write default tz into recurrence params when helpful
-    if payload.recurrence_mode in ("cron","set") and not rec_params.get("tz"):
-        rec_params["tz"] = tz
+    validate_payload(payload)
+    tz = get_tz()
+    rp = payload.recurrence_params or {}
+    if payload.recurrence_mode == "none":
+        due = parse_due_str(payload.due_at, tz)
+        if not due:
+            raise HTTPException(400, "Invalid or missing due_at")
+        next_due = due
+    else:
+        due = None
+        next_due = compute_next_due(payload.recurrence_mode, rp, None, datetime.now(ZoneInfo("UTC")))
     t = Task(
         name=payload.name.strip(),
-        type=(payload.type or "").strip() or None,
-        subtype=(payload.subtype or "").strip() or None,
-        url=str(payload.url) if payload.url else None,
-        description=payload.description or None,
-        tags=tags,
+        type=(payload.type or None),
+        subtype=(payload.subtype or None),
+        url=(str(payload.url) if payload.url else None),
+        description=(payload.description or None),
+        tags=",".join(payload.tags or []),
         recurrence_mode=payload.recurrence_mode,
-        recurrence_params=json.dumps(rec_params),
-        due_at=due_at,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        recurrence_params=serialize_rp(rp),
+        due_at=due,
+        next_due_at=next_due,
     )
-    # precompute next_due_at
-    t.next_due_at = compute_next_due(t, datetime.utcnow())
     db.add(t)
     db.commit()
     db.refresh(t)
     return TaskOut.from_model(t, tz)
-
-@app.put("/api/tasks/{task_id}", response_model=TaskOut)
-def update_task(task_id: int, payload: TaskIn, db: Session = Depends(get_db)):
-    tz = TZ
-    t = db.get(Task, task_id)
-    if not t:
-        raise HTTPException(status_code=404, detail="Task not found")
-    t.name = payload.name.strip()
-    t.type = (payload.type or "").strip() or None
-    t.subtype = (payload.subtype or "").strip() or None
-    t.url = str(payload.url) if payload.url else None
-    t.description = payload.description or None
-    t.tags = ",".join(payload.tags or [])
-    t.recurrence_mode = payload.recurrence_mode
-    t.recurrence_params = json.dumps(payload.recurrence_params or {})
-    t.due_at = parse_due_str(payload.due_at, tz) if payload.recurrence_mode == "none" else None
-    t.updated_at = datetime.utcnow()
-    t.next_due_at = compute_next_due(t, datetime.utcnow())
-    db.commit()
-    db.refresh(t)
-    return TaskOut.from_model(t, tz)
-
-@app.post("/api/tasks/{task_id}/advance")
-def advance(task_id: int, db: Session = Depends(get_db)):
-    t = db.get(Task, task_id)
-    if not t:
-        raise HTTPException(status_code=404, detail="Task not found")
-    now = datetime.utcnow()
-    t.last_completed_at = now
-    t.next_due_at = compute_next_due(t, now)
-    t.updated_at = now
-    db.commit()
-    return {"status": "advanced", "next_due_at": to_user_tz(t.next_due_at, TZ)}
-
-@app.delete("/api/tasks/{task_id}")
-def delete_task(task_id: int, db: Session = Depends(get_db)):
-    t = db.get(Task, task_id)
-    if not t:
-        raise HTTPException(status_code=404, detail="Task not found")
-    db.delete(t)
-    db.commit()
-    return {"status": "deleted"}
 
 @app.get("/api/tasks/{task_id}", response_model=TaskOut)
 def get_task(task_id: int, db: Session = Depends(get_db)):
     row = db.get(Task, task_id)
     if not row:
         raise HTTPException(404, "Not found")
-    return TaskOut.from_orm(row)
+    return TaskOut.from_model(row, get_tz())
+
+@app.put("/api/tasks/{task_id}", response_model=TaskOut)
+def update_task(task_id: int, payload: TaskIn, db: Session = Depends(get_db)):
+    validate_payload(payload)
+    t = db.get(Task, task_id)
+    if not t:
+        raise HTTPException(404, "Not found")
+    tz = get_tz()
+    t.name = payload.name.strip()
+    t.type = payload.type or None
+    t.subtype = payload.subtype or None
+    t.url = str(payload.url) if payload.url else None
+    t.description = payload.description or None
+    t.tags = ",".join(payload.tags or [])
+    t.recurrence_mode = payload.recurrence_mode
+    rp = payload.recurrence_params or {}
+    t.recurrence_params = serialize_rp(rp)
+    if t.recurrence_mode == "none":
+        t.due_at = parse_due_str(payload.due_at, tz)
+        t.next_due_at = t.due_at
+    else:
+        t.due_at = None
+        t.next_due_at = compute_next_due(t.recurrence_mode, rp, None, datetime.now(ZoneInfo("UTC")))
+    db.commit()
+    db.refresh(t)
+    return TaskOut.from_model(t, tz)
+
+@app.post("/api/tasks/{task_id}/advance", response_model=TaskOut)
+def advance_task(task_id: int, db: Session = Depends(get_db)):
+    t = db.get(Task, task_id)
+    if not t:
+        raise HTTPException(404, "Not found")
+    now = datetime.now(ZoneInfo("UTC"))
+    try:
+        rp = json.loads(t.recurrence_params or "{}") or {}
+    except Exception:
+        rp = {}
+    if t.recurrence_mode == "none":
+        t.last_done_at = now
+        t.due_at = None
+        t.next_due_at = None
+    elif t.recurrence_mode == "after":
+        t.last_done_at = now
+        t.next_due_at = compute_next_due("after", rp, None, now)
+    elif t.recurrence_mode == "cron":
+        t.last_done_at = now
+        t.next_due_at = compute_next_due("cron", rp, None, now + timedelta(seconds=1))
+    elif t.recurrence_mode == "set":
+        times = (rp.get("times") or [])
+        tzname = rp.get("tz") or "UTC"
+        try:
+            tzinfo = ZoneInfo(tzname)
+        except Exception:
+            tzinfo = ZoneInfo("UTC")
+        new_times = []
+        for s in times:
+            try:
+                if "T" in s or "Z" in s:
+                    dt = datetime.fromisoformat(s.replace("Z","+00:00"))
+                else:
+                    dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=tzinfo)
+                dt = dt.astimezone(ZoneInfo("UTC"))
+            except Exception:
+                continue
+            if dt > now:
+                new_times.append(s)
+        rp["times"] = new_times
+        t.recurrence_params = serialize_rp(rp)
+        t.last_done_at = now
+        t.next_due_at = compute_next_due("set", rp, None, now + timedelta(seconds=1))
+    db.commit()
+    db.refresh(t)
+    return TaskOut.from_model(t, get_tz())
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task(task_id: int, db: Session = Depends(get_db)):
+    t = db.get(Task, task_id)
+    if not t:
+        raise HTTPException(404, "Task not found")
+    db.delete(t)
+    db.commit()
+    return {"status": "deleted"}
+
+@app.get("/assets/version.json")
+def version_json():
+    f = STATIC_DIR / "version.json"
+    if f.exists():
+        try:
+            return JSONResponse(json.loads(f.read_text()))
+        except Exception:
+            pass
+    return {"version":"dev","summary":"Timeboard","changes":[]}

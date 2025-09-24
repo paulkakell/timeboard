@@ -1,43 +1,24 @@
 <!doctype html>
 <html lang="en"><head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>About · Timeboard</title>
-<link rel="stylesheet" href="/static/styles.css"/>
-<script defer src="/static/header.js"></script>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>About</title>
+  <link rel="stylesheet" href="/static/styles.css"/>
+  <script defer src="/static/header.js"></script>
 </head><body>
-<header>
-  <div class="brand"><a href="/">Timeboard</a></div>
-  <nav>
-    <a href="/">Dashboard</a>
-    <a href="/new">New Task</a>
-    <a href="/about" class="active">About</a>
-  </nav>
-</header>
-<div class="container">
-  <div class="card">
-    <h1>About Timeboard</h1>
-    <p id="summary"></p>
-    <p>Repository: <a href="https://github.com/paulkakell/timeboard" target="_blank">github.com/paulkakell/timeboard</a></p>
-    <h2>Versions</h2>
-    <ul id="versions"></ul>
+  <header id="header"></header>
+  <div class="container">
+    <div class="card">
+      <h2>Timeboard</h2>
+      <p>Minimal task board with one-time and recurring schedules.</p>
+      <ul>
+        <li>One-time due date</li>
+        <li>After completion recurrence</li>
+        <li>Cron schedule</li>
+        <li>Fixed set of dates</li>
+      </ul>
+    </div>
+    <div id="footer"></div>
   </div>
-</div>
-<div class="footer" id="footer"></div>
-<script>
-async function loadVersion(){
-  try{
-    const r = await fetch('/assets/version.json');
-    const v = await r.json();
-    document.getElementById('summary').textContent = v.summary || '';
-    const ul = document.getElementById('versions');
-    ul.innerHTML = (v.changes||[]).map(c=>'<li>'+c+'</li>').join('');
-    // footer
-    const f = document.getElementById('footer');
-    f.innerHTML = '<a href="https://github.com/paulkakell/timeboard" target="_blank">'+(v.version||'dev')+'</a>';
-  }catch(e){}
-}
-loadVersion();
-</script>
-<script src="/static/footer.js"></script>
+  <script src="/static/footer.js"></script>
 </body></html>
