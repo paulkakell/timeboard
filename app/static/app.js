@@ -83,3 +83,14 @@ document.getElementById('taskTable').addEventListener('click', async (e)=>{
   if (act==='advance'){ await advanceTask(id); await refresh(); }
   if (act==='delete'){ if (confirm('Delete task?')) { await deleteTask(id); await refresh(); } }
 });
+
+document.addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const act = btn.getAttribute('data-act');
+  const id = btn.getAttribute('data-id');
+  if (act==='edit'){ location.href = `/new?id=${id}`; return; }
+  if (act==='delete'){ if (!confirm('Delete this task?')) return;
+    fetch(`/api/tasks/${id}`, { method:'DELETE' }).then(()=>refresh());
+  }
+});

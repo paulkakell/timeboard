@@ -41,3 +41,16 @@ th{font-variant:all-small-caps;letter-spacing:.04em;color:var(--muted)}
   .container{padding:12px}
   td,th{padding:8px}
 }
+
+/* Subheader with search */
+.subheader{padding:8px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px}
+.subheader input{max-width:800px}
+
+/* Footer bar shared across pages */
+.site-footer{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-top:1px solid var(--border);background:rgba(15,17,21,0.9);backdrop-filter:saturate(120%) blur(6px)}
+.site-footer .left, .site-footer .right{font-size:12px;color:var(--muted)}
+.site-footer a{color:var(--muted);text-decoration:underline}
+/* Version badge in footer */
+.version-badge{font-weight:600}
+/* Responsive tweak for mobile spacing */
+@media(max-width:600px){ header, .subheader{padding:10px} .container{padding:10px} }

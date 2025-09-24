@@ -176,7 +176,7 @@ def about_page():
 
 @app.get("/api/meta")
 def meta():
-    return {"tz": TZ, "release": RELEASE_VERSION, "repository_url": REPOSITORY_URL}
+    return {"tz": TZ, "release": RELEASE_VERSION, "repository_url": REPOSITORY_URL, "powered_by": os.getenv("POWERED_BY", "")}
 
 @app.get("/api/tasks", response_model=List[TaskOut])
 def list_tasks(db: Session = Depends(get_db)):
@@ -255,3 +255,10 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
     db.delete(t)
     db.commit()
     return {"status": "deleted"}
+
+@app.get("/api/tasks/{task_id}", response_model=TaskOut)
+def get_task(task_id: int, db: Session = Depends(get_db)):
+    row = db.get(Task, task_id)
+    if not row:
+        raise HTTPException(404, "Not found")
+    return TaskOut.from_orm(row)

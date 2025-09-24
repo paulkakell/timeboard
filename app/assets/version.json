@@ -1,6 +1,11 @@
 {
-  "version": "v1.2.1",
+  "version": "v1.3.0",
   "changes": [
+    "Header standardized via header.js with brand and nav, search bar moved to second line",
+    "Footer standardized via footer.js with \u00a9 2025, version badge right, Powered By env, and repo link",
+    "Edit existing tasks via New Task page using query parameter ?id= and reuse create logic; added delete control",
+    "API: /api/meta includes powered_by; added GET /api/tasks/{id}",
+    "Visual theme aligned to twitchybutt.com dark style and small-caps nav",
     "Responsive layout improvements for mobile",
     "Footer shows version from assets/version.json with repository link",
     "Re-added 'Timeboard' brand in header",
