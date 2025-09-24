@@ -10,14 +10,15 @@
   <header>
     <h1>Timeboard</h1>
     <input id="search" placeholder="Search (supports name:foo type:bar tag:baz AND/OR)"/>
+    <button id="newTaskBtn" class="small">New task</button>
   </header>
 
   <section class="table-wrap">
     <table id="taskTable">
       <thead>
         <tr>
-          <th data-sort="actions">Done</th>
-          <th data-sort="open">Open</th>
+          <th>Done</th>
+          <th>Open</th>
           <th data-sort="time_left_ms">Time Left</th>
           <th data-sort="name">Name</th>
           <th data-sort="type">Type</th>
@@ -25,11 +26,93 @@
           <th data-sort="description">Task Instructions</th>
           <th data-sort="tags">Tags</th>
           <th data-sort="recurrence">Recurrence</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody></tbody>
     </table>
   </section>
+
+  <!-- Modal -->
+  <div id="modalBackdrop" class="modal-backdrop hidden"></div>
+  <div id="taskModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-header">
+      <h2 id="modalTitle">New task</h2>
+      <button id="closeModal" class="icon-btn" title="Close">✕</button>
+    </div>
+    <form id="taskForm" class="form">
+      <div class="grid">
+        <label>Name
+          <input name="name" required maxlength="200"/>
+        </label>
+        <label>Type
+          <input name="type" maxlength="100"/>
+        </label>
+        <label>Subtype
+          <input name="subtype" maxlength="100"/>
+        </label>
+        <label>URL
+          <input name="url" type="url" placeholder="https://example.com" />
+        </label>
+        <label>Tags (comma separated)
+          <input name="tags" placeholder="home, bills"/>
+        </label>
+      </div>
+
+      <label>Description
+        <textarea name="description" rows="4" maxlength="4000"></textarea>
+      </label>
+
+      <fieldset class="recurrence">
+        <legend>Recurrence</legend>
+        <label><input type="radio" name="recurrence_mode" value="none" checked/> One-time</label>
+        <label><input type="radio" name="recurrence_mode" value="after"/> After completion</label>
+        <label><input type="radio" name="recurrence_mode" value="cron"/> Fixed time each schedule</label>
+        <label><input type="radio" name="recurrence_mode" value="set"/> Specific times set</label>
+
+        <div data-mode="none" class="recurrence-fields">
+          <label>Due at (UTC ISO)
+            <input name="due_at" placeholder="2025-10-01T18:00:00Z"/>
+          </label>
+        </div>
+
+        <div data-mode="after" class="recurrence-fields hidden">
+          <div class="hflex">
+            <label>Every
+              <input name="after_interval_value" type="number" min="1" step="1" placeholder="6"/>
+            </label>
+            <label>Unit
+              <select name="after_interval_unit">
+                <option value="minutes">minutes</option>
+                <option value="hours">hours</option>
+                <option value="days">days</option>
+                <option value="months">months</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div data-mode="cron" class="recurrence-fields hidden">
+          <label>Cron
+            <input name="cron" placeholder="0 12 * * *"/>
+          </label>
+          <small>Example daily at noon: 0 12 * * *</small>
+        </div>
+
+        <div data-mode="set" class="recurrence-fields hidden">
+          <label>Cron list (one per line)
+            <textarea name="cron_set" rows="4" placeholder="0 16 * * 1,3,5&#10;0 20 * * 1,3,5"></textarea>
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="modal-actions">
+        <button type="submit" class="primary">Save</button>
+        <button type="button" id="deleteBtn" class="danger hidden">Delete</button>
+      </div>
+      <div id="formMsg" class="form-msg" role="status" aria-live="polite"></div>
+    </form>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>

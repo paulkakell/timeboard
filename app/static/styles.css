@@ -16,16 +16,34 @@ table { width:100%; border-collapse: collapse; }
 thead th { text-align:left; font-size:12px; color:#aeb6c2; cursor:pointer; padding:10px 8px; border-bottom:1px solid #2a2f3a; }
 tbody td { padding:10px 8px; border-bottom:1px solid #1e2330; vertical-align:top; }
 
-button.small {
-  padding:6px 10px; border:0; border-radius:6px; background:#2b3344; color:#e8e8e8; cursor:pointer;
+button.small, .primary, .danger, .icon-btn {
+  padding:8px 12px; border:0; border-radius:6px; background:#2b3344; color:#e8e8e8; cursor:pointer;
 }
-button.small:hover { filter:brightness(1.15); }
+button.small:hover, .primary:hover, .danger:hover, .icon-btn:hover { filter:brightness(1.15); }
+.primary { background:#1f6feb; }
+.danger { background:#b42318; }
+.icon-btn { padding:4px 8px; background:#2b3344; }
 
 .badge { display:inline-block; padding:2px 8px; margin:2px 4px 0 0; border-radius:999px; background:#22293a; font-size:12px; color:#cbd5e1; }
+.timecell { font-weight:700; border-radius:6px; padding:8px; display:inline-block; min-width:150px; text-align:center; }
 
-.timecell {
-  font-weight:700; border-radius:6px; padding:8px; display:inline-block; min-width:150px; text-align:center;
+/* Modal */
+.hidden { display:none; }
+.modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:50; }
+.modal { position:fixed; inset:auto 0 0 0; max-width:800px; margin:5vh auto; background:#0b0d13; border:1px solid #1b2030; border-radius:8px; padding:0; z-index:60; }
+.modal-header { display:flex; justify-content:space-between; align-items:center; padding:12px 12px; border-bottom:1px solid #1b2030; }
+.form { padding:12px; display:flex; flex-direction:column; gap:12px; }
+.form label { display:flex; flex-direction:column; gap:6px; font-size:14px; }
+.form input, .form textarea, .form select {
+  padding:10px; border:1px solid #3a4254; background:#151823; color:#e8e8e8; border-radius:6px;
 }
+.grid { display:grid; gap:12px; grid-template-columns: repeat(2, minmax(0,1fr)); }
+.hflex { display:flex; gap:12px; align-items:flex-end; }
+fieldset.recurrence { border:1px solid #1b2030; border-radius:8px; padding:12px; }
+fieldset.recurrence legend { padding:0 6px; color:#aeb6c2; }
+.recurrence-fields { margin-top:8px; }
+.modal-actions { display:flex; gap:12px; justify-content:flex-end; }
+.form-msg { color:#9ccfd8; font-size:12px; min-height:16px; }
 
 /* Responsive */
 @media (max-width: 900px) {
@@ -38,4 +56,5 @@ button.small:hover { filter:brightness(1.15); }
     display:block; color:#9aa3b2; font-size:12px; margin-bottom:2px;
   }
   .timecell { min-width:unset; width:100%; }
+  .grid { grid-template-columns: 1fr; }
 }
