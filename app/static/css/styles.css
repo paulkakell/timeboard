@@ -26,25 +26,25 @@ the cell color.
 
 /* Past due: yellow text on red background */
 .time-left-cell.tl-past {
-  background-color: #dc3545 !important;
+  background-color: #ff0000 !important;
   color: #ffff00 !important;
 }
 
 /* 0–8 hours: black text on orange background */
 .time-left-cell.tl-0-8 {
-  background-color: #fd7e14 !important;
+  background-color: #ffa500 !important;
   color: #000000 !important;
 }
 
 /* 8–24 hours: black text on yellow background */
 .time-left-cell.tl-8-24 {
-  background-color: #ffc107 !important;
+  background-color: #ffff00 !important;
   color: #000000 !important;
 }
 
 /* >24 hours: black text on green background */
 .time-left-cell.tl-24p {
-  background-color: #d1e7dd !important;
+  background-color: #00ff00 !important;
   color: #000000 !important;
 }
 
