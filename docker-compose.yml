@@ -5,5 +5,5 @@ services:
     ports:
       - "8888:8888"
     volumes:
-      - {$CONFIGPATH}:/data
+      - ${CONFIGPATH}:/data
     restart: unless-stopped
