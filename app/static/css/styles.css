@@ -1,62 +1,52 @@
-.time-left-cell {
-  border-radius: 0.25rem;
-}
-
 /*
-  Dashboard "Time Left" color scheme
+Time Left dashboard colors
 
-  Why CSS vars are used:
-  Bootstrap 5.3 tables paint cell backgrounds using the --bs-table-bg custom property
-  plus an inset box-shadow layer. Setting --bs-table-bg/--bs-table-color on the cell
-  is the most reliable way to override the background inside a .table.
+Bootstrap 5 tables paint cell backgrounds using a more specific selector
+(`.table > :not(caption) > * > *`) and an inset box-shadow overlay.
 
-  Requirements:
-  - Past Due: yellow text on red background (Time Left cell)
-  - 0-8h: black text on orange background (Time Left cell)
-  - 8-24h: black text on yellow background (Time Left cell)
-  - 24h+: black text on green background (Time Left cell)
+If we only set `background-color` on `.tl-*`, Bootstrap wins on specificity
+and the colored backgrounds never appear.
+
+Fix: target the actual <td> (`.time-left-cell`) with higher specificity,
+disable the Bootstrap overlay, and force the muted "Due …" text to inherit
+the cell color.
 */
 
-.time-left-cell.tl-past {
-  --bs-table-bg: #dc3545;       /* red */
-  --bs-table-color: #ffeb3b;    /* yellow */
-  background-color: #dc3545 !important;
-  color: #ffeb3b !important;
+.time-left-cell {
+  border-radius: 0.25rem;
+  /* Bootstrap tables use a 9999px inset shadow to paint backgrounds.
+     Disable it for this cell so our background-color always shows. */
   box-shadow: none !important;
 }
 
-.time-left-cell.tl-0-8 {
-  --bs-table-bg: #fd7e14;       /* orange */
-  --bs-table-color: #000000;    /* black */
-  background-color: #fd7e14 !important;
-  color: #000000 !important;
-  box-shadow: none !important;
-}
-
-.time-left-cell.tl-8-24 {
-  --bs-table-bg: #ffc107;       /* yellow */
-  --bs-table-color: #000000;    /* black */
-  background-color: #ffc107 !important;
-  color: #000000 !important;
-  box-shadow: none !important;
-}
-
-.time-left-cell.tl-24p {
-  --bs-table-bg: #90ee90;       /* green (lightgreen) */
-  --bs-table-color: #000000;    /* black */
-  background-color: #90ee90 !important;
-  color: #000000 !important;
-  box-shadow: none !important;
-}
-
-/* Ensure the "Due ..." line follows the Time Left cell scheme (Bootstrap uses !important on .text-muted) */
-.time-left-cell.tl-past .text-muted,
-.time-left-cell.tl-0-8 .text-muted,
-.time-left-cell.tl-8-24 .text-muted,
-.time-left-cell.tl-24p .text-muted {
+/* Keep the "Due …" line readable on colored backgrounds */
+.time-left-cell .text-muted {
   color: inherit !important;
 }
 
+/* Past due: yellow text on red background */
+.time-left-cell.tl-past {
+  background-color: #dc3545 !important;
+  color: #ffff00 !important;
+}
+
+/* 0–8 hours: black text on orange background */
+.time-left-cell.tl-0-8 {
+  background-color: #fd7e14 !important;
+  color: #000000 !important;
+}
+
+/* 8–24 hours: black text on yellow background */
+.time-left-cell.tl-8-24 {
+  background-color: #ffc107 !important;
+  color: #000000 !important;
+}
+
+/* >24 hours: black text on green background */
+.time-left-cell.tl-24p {
+  background-color: #d1e7dd !important;
+  color: #000000 !important;
+}
 
 /* Make link-style buttons look consistent */
 .btn-link.btn-sm {
