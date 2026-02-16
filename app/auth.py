@@ -14,7 +14,20 @@ from .db import get_db
 from .models import User
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use PBKDF2-SHA256 instead of bcrypt.
+#
+# Rationale:
+# - The upstream `bcrypt` Python package enforces a hard 72-byte password limit.
+# - `passlib`'s bcrypt handler is also known to break with newer bcrypt releases
+#   (e.g., removal of bcrypt.__about__). This caused container startup failures.
+# - PBKDF2-SHA256 is implemented fully in passlib and has no external binary
+#   dependency, making docker builds more stable.
+pwd_context = CryptContext(
+    schemes=["pbkdf2_sha256"],
+    deprecated="auto",
+    # Tune rounds for a reasonable security/performance balance on small servers.
+    pbkdf2_sha256__rounds=200_000,
+)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
