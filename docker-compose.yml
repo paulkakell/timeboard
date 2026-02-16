@@ -5,8 +5,5 @@ services:
     ports:
       - "8888:8888"
     volumes:
-      - timeboard-data:/data
+      - ${CONFIG_DATA}:/data
     restart: unless-stopped
-
-volumes:
-  timeboard-data:
