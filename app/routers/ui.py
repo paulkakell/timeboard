@@ -28,7 +28,6 @@ from ..crud import (
 from ..db import get_db
 from ..models import RecurrenceType, Task, TaskStatus, Theme, User
 from ..utils.humanize import humanize_timedelta, time_left_class, seconds_to_duration_str
-from ..recurrence import fixed_calendar_rule_to_human
 from ..utils.time_utils import iso_for_datetime_local_input, now_utc, to_local
 
 
@@ -39,6 +38,22 @@ templates_dir = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(templates_dir))
 # Jinja filters
 templates.env.filters["dt_local"] = lambda dt: to_local(dt).strftime("%Y-%m-%d %H:%M") if dt else ""
+
+# Cache-busting for static assets.
+#
+# Some deployments (reverse proxies/CDNs) or browsers can aggressively cache
+# /static/css/styles.css. The dashboard's time-left colors are purely CSS;
+# if the old stylesheet is cached, changes appear to have "no effect".
+#
+# We version static assets by their file modification times so the URL changes
+# on each deploy (e.g. /static/css/styles.css?v=1700000000).
+static_dir = Path(__file__).resolve().parent.parent / "static"
+try:
+    css_mtime = (static_dir / "css" / "styles.css").stat().st_mtime
+    js_mtime = (static_dir / "js" / "main.js").stat().st_mtime
+    templates.env.globals["static_version"] = str(int(max(css_mtime, js_mtime)))
+except Exception:
+    templates.env.globals["static_version"] = "1"
 
 
 settings = get_settings()
@@ -77,16 +92,6 @@ def _task_form_context(task: Task | None = None) -> dict:
             "tags": "",
         }
 
-    recurrence_interval_display = "" if not task.recurrence_interval_seconds else seconds_to_duration_str(int(task.recurrence_interval_seconds))
-    if (
-        task.recurrence_type == RecurrenceType.fixed_clock.value
-        and not task.recurrence_interval_seconds
-        and task.recurrence_times
-        and "FREQ=" in task.recurrence_times.upper()
-    ):
-        # Calendar-based fixed scheduling stores its RRULE-like string in recurrence_times.
-        recurrence_interval_display = fixed_calendar_rule_to_human(task.recurrence_times)
-
     return {
         "task": task,
         "name": task.name,
@@ -95,7 +100,7 @@ def _task_form_context(task: Task | None = None) -> dict:
         "url": task.url or "",
         "due_date": iso_for_datetime_local_input(task.due_date_utc),
         "recurrence_type": task.recurrence_type,
-        "recurrence_interval": recurrence_interval_display,
+        "recurrence_interval": "" if not task.recurrence_interval_seconds else seconds_to_duration_str(int(task.recurrence_interval_seconds)),
         "recurrence_times": task.recurrence_times or "",
         "tags": ", ".join([t.name for t in (task.tags or [])]),
     }
