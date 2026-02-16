@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h4 mb-1">Dashboard</h1>
+    {% if tag_filter %}
+      <div class="small">Filtering by tag <span class="badge text-bg-secondary">{{ tag_filter }}</span> <a href="/dashboard" class="ms-2">Clear</a></div>
+    {% endif %}
+  </div>
+
+  {% if current_user.is_admin %}
+  <form method="get" action="/dashboard" class="d-flex align-items-center gap-2">
+    {% if tag_filter %}
+      <input type="hidden" name="tag" value="{{ tag_filter }}">
+    {% endif %}
+    <label class="small text-muted">User</label>
+    <select class="form-select form-select-sm" name="user_id" onchange="this.form.submit()" style="min-width: 220px;">
+      <option value="">All users</option>
+      {% for u in all_users %}
+        <option value="{{ u.id }}" {% if user_filter and u.id==user_filter %}selected{% endif %}>{{ u.username }}</option>
+      {% endfor %}
+    </select>
+    <noscript><button class="btn btn-sm btn-outline-secondary" type="submit">Apply</button></noscript>
+  </form>
+  {% endif %}
+</div>
+
+<div class="table-responsive">
+  <table class="table align-middle">
+    <thead>
+      <tr>
+        <th style="width: 160px;">Time Left</th>
+        <th>Task Name</th>
+        <th style="width: 260px;">Task Type</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in tasks %}
+        {% set t = row.task %}
+        <tr>
+          <td class="time-left-cell {{ row.time_left_class }}">
+            <div class="fw-semibold">{{ row.time_left }}</div>
+            <div class="small text-muted">Due {{ t.due_date_utc | dt_local }}</div>
+          </td>
+          <td>
+            <div class="fw-semibold">{{ t.name }}</div>
+            {% if current_user.is_admin %}
+              <div class="small text-muted">Owner: {{ t.user.username }}</div>
+            {% endif %}
+            {% if t.tags and t.tags|length > 0 %}
+              <div class="mt-1">
+                {% for tag in t.tags %}
+                  <a class="badge text-bg-secondary text-decoration-none me-1" href="/dashboard?tag={{ tag.name }}{% if current_user.is_admin and user_filter %}&user_id={{ user_filter }}{% endif %}">{{ tag.name }}</a>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </td>
+          <td>
+            <div>
+              {% if t.url %}
+                <a href="{{ t.url }}" target="_blank" rel="noopener noreferrer">{{ t.task_type }}</a>
+              {% else %}
+                {{ t.task_type }}
+              {% endif %}
+            </div>
+            <div class="small mt-1">
+              <form method="post" action="/tasks/{{ t.id }}/complete" class="d-inline">
+                <button class="btn btn-link btn-sm p-0" type="submit">Complete</button>
+              </form>
+              <span class="text-muted">|</span>
+              <a class="btn btn-link btn-sm p-0" href="/tasks/{{ t.id }}/edit">Update</a>
+              <span class="text-muted">|</span>
+              <form method="post" action="/tasks/{{ t.id }}/delete" class="d-inline" onsubmit="return confirm('Delete this task?');">
+                <button class="btn btn-link btn-sm p-0" type="submit">Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+
+      {% if tasks|length == 0 %}
+        <tr>
+          <td colspan="3" class="text-muted">No tasks.</td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

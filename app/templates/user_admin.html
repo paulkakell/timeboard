@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h4 mb-3">User Administration</h1>
+
+{% if error %}
+  <div class="alert alert-danger" role="alert">{{ error }}</div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">Create user</div>
+      <div class="card-body">
+        <form method="post" action="/admin/users/create" class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Username</label>
+            <input class="form-control" type="text" name="username" required>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Password</label>
+            <input class="form-control" type="password" name="password" required>
+          </div>
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="is_admin" value="true" id="is_admin">
+              <label class="form-check-label" for="is_admin">Admin</label>
+            </div>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary" type="submit">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">Users</div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for u in users %}
+                <tr>
+                  <td>{{ u.username }}</td>
+                  <td>{% if u.is_admin %}Admin{% else %}User{% endif %}</td>
+                  <td class="text-end">
+                    {% if u.id != current_user.id %}
+                    <form method="post" action="/admin/users/{{ u.id }}/delete" class="d-inline" onsubmit="return confirm('Delete user {{ u.username }} and all associated tasks?');">
+                      <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                    </form>
+                    {% else %}
+                      <span class="text-muted small">(current)</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

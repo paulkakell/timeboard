@@ -1,0 +1,20 @@
+app:
+  name: "Timeboard"
+  timezone: "America/Denver"   # Used for display and interpreting date/time inputs
+  host: "0.0.0.0"
+  port: 8888
+  base_url: ""                 # If served behind a reverse proxy, e.g. https://example.com
+
+security:
+  session_secret: "CHANGE_ME_SESSION_SECRET"  # Used to sign UI session cookies
+  jwt_secret: "CHANGE_ME_JWT_SECRET"          # Used to sign API JWT tokens
+
+database:
+  path: "/data/timeboard.db"     # SQLite database file
+
+purge:
+  default_days: 15                # Default purge window for archived tasks (per-user override exists)
+  interval_minutes: 60            # How often to purge archived tasks
+
+logging:
+  level: "INFO"

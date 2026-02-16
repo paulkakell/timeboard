@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h4 mb-3">{% if mode=='new' %}New Task{% else %}Edit Task{% endif %}</h1>
+
+{% if error %}
+  <div class="alert alert-danger" role="alert">{{ error }}</div>
+{% endif %}
+
+<form method="post" class="card card-body" action="{% if mode=='new' %}/tasks/new{% else %}/tasks/{{ task.id }}/edit{% endif %}">
+  <div class="row g-3">
+    <div class="col-12">
+      <label class="form-label">Task Name</label>
+      <input class="form-control" type="text" name="name" value="{{ name }}" required>
+    </div>
+
+    <div class="col-12 col-md-6">
+      <label class="form-label">Task Type</label>
+      <input class="form-control" type="text" name="task_type" value="{{ task_type }}" required>
+      <div class="form-text">If a URL is provided, this value becomes the clickable link text in the dashboard.</div>
+    </div>
+
+    <div class="col-12 col-md-6">
+      <label class="form-label">Due Date</label>
+      <input class="form-control" type="datetime-local" name="due_date" value="{{ due_date }}" required>
+    </div>
+
+    <div class="col-12">
+      <label class="form-label">Description (optional)</label>
+      <textarea class="form-control" name="description" rows="3">{{ description }}</textarea>
+    </div>
+
+    <div class="col-12 col-md-6">
+      <label class="form-label">URL (optional)</label>
+      <input class="form-control" type="url" name="url" value="{{ url }}" placeholder="https://...">
+    </div>
+
+    <div class="col-12 col-md-6">
+      <label class="form-label">Tags (optional)</label>
+      <input class="form-control" type="text" name="tags" value="{{ tags }}" placeholder="comma, separated, tags">
+    </div>
+
+    <div class="col-12">
+      <label class="form-label">Recurrence</label>
+      <select class="form-select" name="recurrence_type" id="recurrence_type">
+        <option value="none" {% if recurrence_type=='none' %}selected{% endif %}>None</option>
+        <option value="post_completion" {% if recurrence_type=='post_completion' %}selected{% endif %}>Post-Completion Interval</option>
+        <option value="multi_slot_daily" {% if recurrence_type=='multi_slot_daily' %}selected{% endif %}>Multi-Slot Daily Scheduling</option>
+        <option value="fixed_clock" {% if recurrence_type=='fixed_clock' %}selected{% endif %}>Fixed Clock Scheduling</option>
+      </select>
+      <div class="form-text">Post-Completion: interval after marking complete. Multi-Slot: list of daily times. Fixed Clock: anchored interval regardless of completion.</div>
+    </div>
+
+    <div class="col-12 col-md-6" id="recurrence_interval_group">
+      <label class="form-label">Recurrence Interval</label>
+      <input class="form-control" type="text" name="recurrence_interval" value="{{ recurrence_interval }}" placeholder="e.g. 8h, 30m, 1d 2h">
+      <div class="form-text">Used for Post-Completion Interval and Fixed Clock Scheduling.</div>
+    </div>
+
+    <div class="col-12 col-md-6" id="recurrence_times_group">
+      <label class="form-label">Daily Time Slots</label>
+      <input class="form-control" type="text" name="recurrence_times" value="{{ recurrence_times }}" placeholder="e.g. 08:00, 15:00, 23:00">
+      <div class="form-text">Used for Multi-Slot Daily Scheduling.</div>
+    </div>
+
+    <div class="col-12 d-flex gap-2">
+      <button class="btn btn-primary" type="submit">Save</button>
+      <a class="btn btn-outline-secondary" href="/dashboard">Cancel</a>
+    </div>
+  </div>
+</form>
+{% endblock %}

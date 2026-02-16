@@ -1,0 +1,12 @@
+services:
+  timeboard:
+    build: .
+    container_name: timeboard
+    ports:
+      - "8888:8888"
+    volumes:
+      - timeboard-data:/data
+    restart: unless-stopped
+
+volumes:
+  timeboard-data:
