@@ -3,53 +3,60 @@
 }
 
 /*
-  Time Left dashboard color scheme
+  Dashboard "Time Left" color scheme
+
+  Why CSS vars are used:
+  Bootstrap 5.3 tables paint cell backgrounds using the --bs-table-bg custom property
+  plus an inset box-shadow layer. Setting --bs-table-bg/--bs-table-color on the cell
+  is the most reliable way to override the background inside a .table.
 
   Requirements:
-  - Past Due: bold yellow text on red background
-  - 0-8h: bold black text on orange background
-  - 8-24h: bold black text on yellow background
-  - 24h+: black text on green background
+  - Past Due: yellow text on red background (Time Left cell)
+  - 0-8h: black text on orange background (Time Left cell)
+  - 8-24h: black text on yellow background (Time Left cell)
+  - 24h+: black text on green background (Time Left cell)
 */
 
 .time-left-cell.tl-past {
-  background-color: #dc3545; /* red */
-  color: #ffff00; /* yellow */
-  font-weight: 700;
+  --bs-table-bg: #dc3545;       /* red */
+  --bs-table-color: #ffeb3b;    /* yellow */
+  background-color: #dc3545 !important;
+  color: #ffeb3b !important;
+  box-shadow: none !important;
 }
 
 .time-left-cell.tl-0-8 {
-  background-color: #fd7e14; /* orange */
-  color: #000;
-  font-weight: 700;
+  --bs-table-bg: #fd7e14;       /* orange */
+  --bs-table-color: #000000;    /* black */
+  background-color: #fd7e14 !important;
+  color: #000000 !important;
+  box-shadow: none !important;
 }
 
 .time-left-cell.tl-8-24 {
-  background-color: #ffc107; /* yellow */
-  color: #000;
-  font-weight: 700;
+  --bs-table-bg: #ffc107;       /* yellow */
+  --bs-table-color: #000000;    /* black */
+  background-color: #ffc107 !important;
+  color: #000000 !important;
+  box-shadow: none !important;
 }
 
 .time-left-cell.tl-24p {
-  background-color: #198754; /* green */
-  color: #000;
+  --bs-table-bg: #90ee90;       /* green (lightgreen) */
+  --bs-table-color: #000000;    /* black */
+  background-color: #90ee90 !important;
+  color: #000000 !important;
+  box-shadow: none !important;
 }
 
-/* Bootstrap's fw-semibold uses !important; enforce the required boldness where needed */
-.time-left-cell.tl-past .fw-semibold,
-.time-left-cell.tl-0-8 .fw-semibold,
-.time-left-cell.tl-8-24 .fw-semibold {
-  font-weight: 700 !important;
-}
-
-/* Ensure the "Due ..." line follows the Time Left cell color scheme */
+/* Ensure the "Due ..." line follows the Time Left cell scheme (Bootstrap uses !important on .text-muted) */
 .time-left-cell.tl-past .text-muted,
 .time-left-cell.tl-0-8 .text-muted,
 .time-left-cell.tl-8-24 .text-muted,
 .time-left-cell.tl-24p .text-muted {
   color: inherit !important;
-  opacity: 0.85;
 }
+
 
 /* Make link-style buttons look consistent */
 .btn-link.btn-sm {
