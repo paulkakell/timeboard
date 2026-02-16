@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session, joinedload
 from .auth import hash_password, verify_password
 from .config import get_settings
 from .models import RecurrenceType, Tag, Task, TaskStatus, Theme, User
-from .recurrence import RecurrenceError, compute_next_due_utc, parse_duration_to_seconds, parse_times_csv
+from .recurrence import (
+    RecurrenceError,
+    compute_next_due_utc,
+    parse_duration_to_seconds,
+    parse_fixed_calendar_rule,
+    parse_times_csv,
+)
 from .utils.time_utils import from_local_to_utc_naive
 
 
@@ -144,11 +150,36 @@ def _apply_recurrence_fields(
     except Exception as e:
         raise ValueError("Invalid recurrence_type") from e
 
-    if rtype in {RecurrenceType.post_completion, RecurrenceType.fixed_clock}:
+    if rtype == RecurrenceType.post_completion:
         if not recurrence_interval:
             raise ValueError("recurrence_interval is required for this recurrence type")
         seconds = parse_duration_to_seconds(recurrence_interval)
         return rtype.value, seconds, None
+
+    if rtype == RecurrenceType.fixed_clock:
+        # Fixed clock scheduling supports two formats:
+        #   1) Legacy interval: "8h", "1d", "2 weeks"...
+        #   2) Fixed calendar rule: "Every Tuesday", "Mon, Wed, Fri", "10th of every month", "First Monday", "January 5"
+        if (recurrence_interval is None or not str(recurrence_interval).strip()) and (
+            recurrence_times is None or not str(recurrence_times).strip()
+        ):
+            raise ValueError("recurrence_interval is required for fixed_clock")
+
+        # Prefer recurrence_interval for backwards compatibility with existing clients/UI.
+        raw = (recurrence_interval or "").strip() if recurrence_interval is not None else ""
+
+        if raw:
+            try:
+                seconds = parse_duration_to_seconds(raw)
+                return rtype.value, seconds, None
+            except RecurrenceError:
+                # Not a duration; treat it as a fixed calendar rule.
+                rule_canonical = parse_fixed_calendar_rule(raw)
+                return rtype.value, None, rule_canonical
+
+        # Fallback: allow supplying the rule in recurrence_times for API clients.
+        rule_canonical = parse_fixed_calendar_rule(str(recurrence_times))
+        return rtype.value, None, rule_canonical
 
     if rtype == RecurrenceType.multi_slot_daily:
         if not recurrence_times:

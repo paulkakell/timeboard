@@ -5,5 +5,8 @@ services:
     ports:
       - "8888:8888"
     volumes:
-      - ${CONFIGPATH}:/data
+      - timeboard-data:/data
     restart: unless-stopped
+
+volumes:
+  timeboard-data:

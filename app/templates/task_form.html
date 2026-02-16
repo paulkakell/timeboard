@@ -47,13 +47,13 @@
         <option value="multi_slot_daily" {% if recurrence_type=='multi_slot_daily' %}selected{% endif %}>Multi-Slot Daily Scheduling</option>
         <option value="fixed_clock" {% if recurrence_type=='fixed_clock' %}selected{% endif %}>Fixed Clock Scheduling</option>
       </select>
-      <div class="form-text">Post-Completion: interval after marking complete. Multi-Slot: list of daily times. Fixed Clock: anchored interval regardless of completion.</div>
+      <div class="form-text">Post-Completion: interval after marking complete. Multi-Slot: list of daily times. Fixed Clock: anchored scheduling regardless of completion (intervals or calendar rules like “Every Tuesday”).</div>
     </div>
 
     <div class="col-12 col-md-6" id="recurrence_interval_group">
-      <label class="form-label">Recurrence Interval</label>
-      <input class="form-control" type="text" name="recurrence_interval" value="{{ recurrence_interval }}" placeholder="e.g. 8h, 30m, 1d 2h">
-      <div class="form-text">Used for Post-Completion Interval and Fixed Clock Scheduling.</div>
+      <label class="form-label">Recurrence Interval / Rule</label>
+      <input class="form-control" type="text" name="recurrence_interval" value="{{ recurrence_interval }}" placeholder="e.g. 8h, 30m, 1d 2h, Every Tuesday, Mon Wed Fri, 10th of every month, First Monday, January 5">
+      <div class="form-text">Post-Completion uses durations. Fixed Clock accepts durations or calendar rules (Every Tuesday, First Monday, 10th of every month, January 5).</div>
     </div>
 
     <div class="col-12 col-md-6" id="recurrence_times_group">

@@ -2,20 +2,53 @@
   border-radius: 0.25rem;
 }
 
-.tl-past {
-  background-color: rgba(220, 53, 69, 0.20);
+/*
+  Time Left dashboard color scheme
+
+  Requirements:
+  - Past Due: bold yellow text on red background
+  - 0-8h: bold black text on orange background
+  - 8-24h: bold black text on yellow background
+  - 24h+: black text on green background
+*/
+
+.time-left-cell.tl-past {
+  background-color: #dc3545; /* red */
+  color: #ffff00; /* yellow */
+  font-weight: 700;
 }
 
-.tl-0-8 {
-  background-color: rgba(253, 126, 20, 0.20);
+.time-left-cell.tl-0-8 {
+  background-color: #fd7e14; /* orange */
+  color: #000;
+  font-weight: 700;
 }
 
-.tl-8-24 {
-  background-color: rgba(255, 193, 7, 0.20);
+.time-left-cell.tl-8-24 {
+  background-color: #ffc107; /* yellow */
+  color: #000;
+  font-weight: 700;
 }
 
-.tl-24p {
-  background-color: rgba(25, 135, 84, 0.20);
+.time-left-cell.tl-24p {
+  background-color: #198754; /* green */
+  color: #000;
+}
+
+/* Bootstrap's fw-semibold uses !important; enforce the required boldness where needed */
+.time-left-cell.tl-past .fw-semibold,
+.time-left-cell.tl-0-8 .fw-semibold,
+.time-left-cell.tl-8-24 .fw-semibold {
+  font-weight: 700 !important;
+}
+
+/* Ensure the "Due ..." line follows the Time Left cell color scheme */
+.time-left-cell.tl-past .text-muted,
+.time-left-cell.tl-0-8 .text-muted,
+.time-left-cell.tl-8-24 .text-muted,
+.time-left-cell.tl-24p .text-muted {
+  color: inherit !important;
+  opacity: 0.85;
 }
 
 /* Make link-style buttons look consistent */

@@ -57,11 +57,19 @@ class TaskBase(BaseModel):
     recurrence_type: str = Field(default=RecurrenceType.none.value)
     recurrence_interval: Optional[str] = Field(
         default=None,
-        description="Human interval like '8h', '30m', '1d 2h'. Used for post_completion and fixed_clock.",
+        description=(
+            "For post_completion: a human duration like '8h', '30m', '1d 2h'. "
+            "For fixed_clock: either a duration OR a calendar rule like 'Every Tuesday', 'Mon Wed Fri', "
+            "'10th of every month', 'First Monday', 'January 5'."
+        ),
     )
     recurrence_times: Optional[str] = Field(
         default=None,
-        description="Comma-separated list of daily times like '08:00, 15:00, 23:00' (or '8:00 am, 3:00 pm').",
+        description=(
+            "For multi_slot_daily: comma-separated list of daily times like '08:00, 15:00, 23:00' "
+            "(or '8:00 am, 3:00 pm'). "
+            "For fixed_clock calendar rules, the server stores an RRULE-like string here internally."
+        ),
     )
 
     tags: List[str] = Field(default_factory=list)

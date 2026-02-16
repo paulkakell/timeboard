@@ -28,6 +28,7 @@ from ..crud import (
 from ..db import get_db
 from ..models import RecurrenceType, Task, TaskStatus, Theme, User
 from ..utils.humanize import humanize_timedelta, time_left_class, seconds_to_duration_str
+from ..recurrence import fixed_calendar_rule_to_human
 from ..utils.time_utils import iso_for_datetime_local_input, now_utc, to_local
 
 
@@ -76,6 +77,16 @@ def _task_form_context(task: Task | None = None) -> dict:
             "tags": "",
         }
 
+    recurrence_interval_display = "" if not task.recurrence_interval_seconds else seconds_to_duration_str(int(task.recurrence_interval_seconds))
+    if (
+        task.recurrence_type == RecurrenceType.fixed_clock.value
+        and not task.recurrence_interval_seconds
+        and task.recurrence_times
+        and "FREQ=" in task.recurrence_times.upper()
+    ):
+        # Calendar-based fixed scheduling stores its RRULE-like string in recurrence_times.
+        recurrence_interval_display = fixed_calendar_rule_to_human(task.recurrence_times)
+
     return {
         "task": task,
         "name": task.name,
@@ -84,7 +95,7 @@ def _task_form_context(task: Task | None = None) -> dict:
         "url": task.url or "",
         "due_date": iso_for_datetime_local_input(task.due_date_utc),
         "recurrence_type": task.recurrence_type,
-        "recurrence_interval": "" if not task.recurrence_interval_seconds else seconds_to_duration_str(int(task.recurrence_interval_seconds)),
+        "recurrence_interval": recurrence_interval_display,
         "recurrence_times": task.recurrence_times or "",
         "tags": ", ".join([t.name for t in (task.tags or [])]),
     }
