@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h4 mb-3">Help</h1>
+
+<div class="alert alert-secondary" role="alert">
+  This page describes how to use {{ app_name }}, how recurrence works, how to manage users, and how to troubleshoot common issues.
+</div>
+
+<div class="accordion" id="helpAccordion">
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="hQuickStart">
+      <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#cQuickStart" aria-expanded="true" aria-controls="cQuickStart">
+        Quick start
+      </button>
+    </h2>
+    <div id="cQuickStart" class="accordion-collapse collapse show" aria-labelledby="hQuickStart" data-bs-parent="#helpAccordion">
+      <div class="accordion-body">
+        <ol class="mb-0">
+          <li>Log in with your user account. If you are the admin, you can create additional users under <strong>Admin</strong>.</li>
+          <li>Create a task with a due date under <strong>New Task</strong>.</li>
+          <li>Use the dashboard to track <strong>Time Left</strong>. When a task is completed, it can optionally re-schedule itself based on the recurrence settings.</li>
+          <li>Use <strong>Profile</strong> to change theme and auto-purge behavior for completed/deleted tasks.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="hDashboard">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cDashboard" aria-expanded="false" aria-controls="cDashboard">
+        Dashboard and task lifecycle
+      </button>
+    </h2>
+    <div id="cDashboard" class="accordion-collapse collapse" aria-labelledby="hDashboard" data-bs-parent="#helpAccordion">
+      <div class="accordion-body">
+        <p class="mb-2">
+          Tasks are shown on the dashboard until they are archived. A task can be in one of three states: active, completed, or deleted.
+          Completed and deleted tasks are retained for a period (configured per user) and then purged by the background scheduler.
+        </p>
+        <ul class="mb-0">
+          <li><strong>Complete</strong>: marks the task completed and, if recurrence is configured, creates the next due date for the same task.</li>
+          <li><strong>Delete</strong>: soft-deletes the task (it is not immediately removed from the database).</li>
+          <li><strong>Tags</strong>: use tags to filter the dashboard quickly and to group related tasks.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item" id="recurrence">
+    <h2 class="accordion-header" id="hRecurrence">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cRecurrence" aria-expanded="false" aria-controls="cRecurrence">
+        Recurrence
+      </button>
+    </h2>
+    <div id="cRecurrence" class="accordion-collapse collapse" aria-labelledby="hRecurrence" data-bs-parent="#helpAccordion">
+      <div class="accordion-body">
+        <p class="mb-2">
+          Recurrence determines how the due date is updated after you complete a task. The UI offers three recurrence modes.
+        </p>
+
+        <h3 class="h6 mt-3">1) Post-Completion Interval</h3>
+        <p class="mb-2">
+          After you mark the task complete, the next due date is set to “completion time + interval”.
+          Use duration strings like: <code>30m</code>, <code>8h</code>, <code>1d</code>, <code>1d 2h</code>, <code>2w</code>.
+        </p>
+
+        <h3 class="h6 mt-3">2) Multi-Slot Daily Scheduling</h3>
+        <p class="mb-2">
+          The task recurs at specific times every day. Enter a comma-separated list of 24-hour times, for example:
+          <code>08:00, 15:00, 23:00</code>.
+          When you complete the task, the next due time is the next slot that has not yet passed (or the first slot tomorrow if all have passed).
+        </p>
+
+        <h3 class="h6 mt-3">3) Fixed Clock Scheduling</h3>
+        <p class="mb-2">
+          Fixed clock scheduling is anchored to the calendar or to a clock interval, regardless of when you complete it.
+          This is useful when you want a task to always land at the same wall-clock times.
+        </p>
+
+        <p class="mb-2"><strong>Fixed interval examples</strong> (anchored): <code>6h</code>, <code>1d</code>, <code>2w</code>.</p>
+
+        <p class="mb-2"><strong>Weekly rule examples</strong>:</p>
+        <ul>
+          <li><code>Every Tuesday</code></li>
+          <li><code>Mon Wed Fri</code></li>
+        </ul>
+
+        <p class="mb-2"><strong>Monthly rule examples</strong>:</p>
+        <ul>
+          <li><code>10th of every month</code></li>
+          <li><code>First Monday</code></li>
+          <li><code>Last Friday</code></li>
+        </ul>
+
+        <p class="mb-2"><strong>Yearly rule examples</strong>:</p>
+        <ul class="mb-0">
+          <li><code>January 5</code></li>
+          <li><code>Jan 5</code></li>
+        </ul>
+
+        <div class="alert alert-info mt-3 mb-0" role="alert">
+          Tip: if a recurrence input is rejected, it will display an error on the task form. Correct the interval or rule and save again.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="hTaskFields">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cTaskFields" aria-expanded="false" aria-controls="cTaskFields">
+        Task fields and links
+      </button>
+    </h2>
+    <div id="cTaskFields" class="accordion-collapse collapse" aria-labelledby="hTaskFields" data-bs-parent="#helpAccordion">
+      <div class="accordion-body">
+        <ul class="mb-0">
+          <li><strong>Task Type</strong>: free text. If you set a URL, the Task Type becomes the clickable link label in the dashboard.</li>
+          <li><strong>Description</strong>: optional notes shown on the task detail/edit view.</li>
+          <li><strong>Tags</strong>: comma-separated list. Tags are normalized and reused across tasks.</li>
+          <li><strong>Due Date</strong>: stored internally in UTC and displayed in the application timezone configured in settings.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="hUsersAdmin">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cUsersAdmin" aria-expanded="false" aria-controls="cUsersAdmin">
+        Users and admin functions
+      </button>
+    </h2>
+    <div id="cUsersAdmin" class="accordion-collapse collapse" aria-labelledby="hUsersAdmin" data-bs-parent="#helpAccordion">
+      <div class="accordion-body">
+        <p class="mb-2">
+          Admin users can create and delete users from the <strong>Admin</strong> page. Passwords are stored as secure hashes.
+        </p>
+        <ul class="mb-0">
+          <li><strong>Creating users</strong>: choose a username and password. The user can then log in and manage their own tasks.</li>
+          <li><strong>Deleting users</strong>: removes the user and their tasks.</li>
+          <li><strong>Lost admin password</strong>: if you cannot log in as admin, reset can be done by directly updating the admin password hash in the database or by using the CLI (if enabled in your deployment).</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="hSettings">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cSettings" aria-expanded="false" aria-controls="cSettings">
+        Configuration (settings.yml)
+      </button>
+    </h2>
+    <div id="cSettings" class="accordion-collapse collapse" aria-labelledby="hSettings" data-bs-parent="#helpAccordion">
+      <div class="accordion-body">
+        <p class="mb-2">
+          Configuration is read from <code>/data/settings.yml</code> by default (or from the path in <code>TIMEBOARD_SETTINGS</code>).
+          A sample file is included as <code>settings.sample.yml</code>.
+        </p>
+
+        <dl class="row mb-0">
+          <dt class="col-sm-3">app.timezone</dt>
+          <dd class="col-sm-9">IANA timezone name used for display and local parsing (example: <code>America/Denver</code>).</dd>
+
+          <dt class="col-sm-3">app.host / app.port</dt>
+          <dd class="col-sm-9">Bind address and port inside the container.</dd>
+
+          <dt class="col-sm-3">app.base_url</dt>
+          <dd class="col-sm-9">Public URL prefix when the app is behind a reverse proxy or served from a subpath.</dd>
+
+          <dt class="col-sm-3">security.session_secret</dt>
+          <dd class="col-sm-9">Secret used to sign session cookies. Change this to a strong random value.</dd>
+
+          <dt class="col-sm-3">security.jwt_secret</dt>
+          <dd class="col-sm-9">Secret used for API tokens (JWT). Change this to a strong random value.</dd>
+
+          <dt class="col-sm-3">database.path</dt>
+          <dd class="col-sm-9">SQLite database file path (default: <code>/data/timeboard.db</code>).</dd>
+
+          <dt class="col-sm-3">purge.default_days</dt>
+          <dd class="col-sm-9">Default retention for completed/deleted tasks for new users.</dd>
+
+          <dt class="col-sm-3">purge.interval_minutes</dt>
+          <dd class="col-sm-9">How often the purge job runs.</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="hApi">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cApi" aria-expanded="false" aria-controls="cApi">
+        API usage
+      </button>
+    </h2>
+    <div id="cApi" class="accordion-collapse collapse" aria-labelledby="hApi" data-bs-parent="#helpAccordion">
+      <div class="accordion-body">
+        <p class="mb-2">
+          The OpenAPI documentation is available under <strong>API Docs</strong>. Use the auth endpoints to obtain a token and then call the task endpoints.
+        </p>
+        <ul class="mb-0">
+          <li><strong>/docs</strong>: interactive OpenAPI UI.</li>
+          <li><strong>/api</strong>: API routes (tasks, tags, users, auth).</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="accordion-item">
+    <h2 class="accordion-header" id="hTroubleshooting">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cTroubleshooting" aria-expanded="false" aria-controls="cTroubleshooting">
+        Troubleshooting
+      </button>
+    </h2>
+    <div id="cTroubleshooting" class="accordion-collapse collapse" aria-labelledby="hTroubleshooting" data-bs-parent="#helpAccordion">
+      <div class="accordion-body">
+        <ul class="mb-0">
+          <li><strong>Dashboard colors do not change</strong>: force-refresh the page. Static assets are versioned, but intermediate proxies can still cache aggressively.</li>
+          <li><strong>Login loop</strong>: verify <code>security.session_secret</code> is stable across restarts and that the container clock is correct.</li>
+          <li><strong>Timezone confusion</strong>: confirm <code>app.timezone</code> is correct and that your browser is not overriding time inputs unexpectedly.</li>
+          <li><strong>Reverse proxy paths</strong>: when serving under a subpath, set <code>app.base_url</code> accordingly.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

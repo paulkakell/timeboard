@@ -25,12 +25,14 @@
             {% endif %}
             <li class="nav-item"><a class="nav-link" href="/docs">API Docs</a></li>
             {% endif %}
+            <li class="nav-item"><a class="nav-link" href="/help">Help</a></li>
           </ul>
           <ul class="navbar-nav ms-auto">
             {% if current_user %}
             <li class="nav-item"><span class="navbar-text me-3">{{ current_user.username }}</span></li>
             <li class="nav-item"><a class="nav-link" href="/logout">Logout</a></li>
             {% endif %}
+            <li class="nav-item"><a class="nav-link" href="/help">Help</a></li>
           </ul>
         </div>
       </div>

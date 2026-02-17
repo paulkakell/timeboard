@@ -588,3 +588,21 @@ def admin_users_delete(request: Request, user_id: int, db: Session = Depends(get
 
     delete_user(db, user_id=user_id)
     return _redirect("/admin/users")
+
+
+@router.get("/help", response_class=HTMLResponse)
+def help_page(request: Request, db: Session = Depends(get_db)):
+    """Render the in-app help page.
+
+    The help page is accessible without authentication so operators can read
+    setup and troubleshooting guidance even before logging in.
+    """
+    user = _get_current_user(request, db)
+    return templates.TemplateResponse(
+        "help.html",
+        {
+            "request": request,
+            "current_user": user,
+            "app_name": settings.app.name,
+        },
+    )
