@@ -16,7 +16,7 @@ DEFAULT_SETTINGS_PATH = os.environ.get("TIMEBOARD_SETTINGS", "/data/settings.yml
 class AppSettings(BaseModel):
     name: str = "Timeboard"
     timezone: str = "UTC"
-    host: str = "0.0.0.0"
+    host: str = "0.0.0.0"  # nosec B104
     port: int = 8888
     base_url: str = ""
 
@@ -35,6 +35,27 @@ class PurgeSettings(BaseModel):
     interval_minutes: int = 60
 
 
+class EmailSettings(BaseModel):
+    # When disabled, password reset and reminders are not sent.
+    enabled: bool = False
+
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+
+    smtp_from: str = "timeboard@localhost"
+
+    # If True, use STARTTLS.
+    use_tls: bool = True
+
+    # Overdue reminder cadence.
+    reminder_interval_minutes: int = 60
+
+    # Password reset token TTL.
+    reset_token_minutes: int = 60
+
+
 class LoggingSettings(BaseModel):
     level: str = "INFO"
 
@@ -44,6 +65,7 @@ class Settings(BaseModel):
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     purge: PurgeSettings = Field(default_factory=PurgeSettings)
+    email: EmailSettings = Field(default_factory=EmailSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 
@@ -65,6 +87,7 @@ def _ensure_settings_file(path: str) -> None:
             "security:\n  session_secret: 'CHANGE_ME_SESSION_SECRET'\n  jwt_secret: 'CHANGE_ME_JWT_SECRET'\n"
             "database:\n  path: '/data/timeboard.db'\n"
             "purge:\n  default_days: 15\n  interval_minutes: 60\n"
+            "email:\n  enabled: false\n  smtp_host: ''\n  smtp_port: 587\n  smtp_username: ''\n  smtp_password: ''\n  smtp_from: 'timeboard@localhost'\n  use_tls: true\n  reminder_interval_minutes: 60\n  reset_token_minutes: 60\n"
         )
 
 

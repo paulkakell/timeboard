@@ -7,6 +7,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from .config import get_settings
@@ -40,8 +41,19 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
-    user = db.query(User).filter(User.username == username).first()
+def authenticate_user(db: Session, username_or_email: str, password: str) -> Optional[User]:
+    ident = (username_or_email or "").strip()
+    if not ident:
+        return None
+
+    # Allow login with either username or email.
+    q = db.query(User).filter(
+        or_(
+            User.username == ident,
+            func.lower(User.email) == ident.lower(),
+        )
+    )
+    user = q.first()
     if not user:
         return None
     if not verify_password(password, user.hashed_password):

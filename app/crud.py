@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from .auth import hash_password, verify_password
 from .config import get_settings
-from .models import RecurrenceType, Tag, Task, TaskStatus, Theme, User
+from .models import PasswordResetToken, RecurrenceType, Tag, Task, TaskStatus, Theme, User
 from .recurrence import (
     RecurrenceError,
     compute_next_due_utc,
@@ -30,11 +31,29 @@ def normalize_datetime_to_utc_naive(dt: datetime) -> datetime:
     return from_local_to_utc_naive(dt)
 
 
+def normalize_email(email: str | None) -> str | None:
+    if email is None:
+        return None
+    e = str(email).strip().lower()
+    return e or None
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 # ---------------------- Users ----------------------
 
 
 def get_user_by_username(db: Session, username: str) -> Optional[User]:
     return db.query(User).filter(User.username == username).first()
+
+
+def get_user_by_email(db: Session, email: str) -> Optional[User]:
+    e = normalize_email(email)
+    if not e:
+        return None
+    return db.query(User).filter(func.lower(User.email) == e).first()
 
 
 def get_user(db: Session, user_id: int) -> Optional[User]:
@@ -45,10 +64,25 @@ def list_users(db: Session) -> list[User]:
     return db.query(User).order_by(User.username.asc()).all()
 
 
-def create_user(db: Session, *, username: str, password: str, is_admin: bool = False) -> User:
+def create_user(
+    db: Session,
+    *,
+    username: str,
+    password: str,
+    is_admin: bool = False,
+    email: str | None = None,
+) -> User:
     settings = get_settings()
+
+    norm_email = normalize_email(email)
+    if norm_email:
+        existing = db.query(User).filter(func.lower(User.email) == norm_email).first()
+        if existing:
+            raise ValueError("Email already exists")
+
     user = User(
         username=username,
+        email=norm_email,
         hashed_password=hash_password(password),
         is_admin=bool(is_admin),
         purge_days=int(settings.purge.default_days),
@@ -74,6 +108,7 @@ def update_user_me(
     user: User,
     theme: Optional[str] = None,
     purge_days: Optional[int] = None,
+    email: Optional[str] = None,
     current_password: Optional[str] = None,
     new_password: Optional[str] = None,
 ) -> User:
@@ -87,6 +122,19 @@ def update_user_me(
             raise ValueError("purge_days must be between 1 and 3650")
         user.purge_days = int(purge_days)
 
+    if email is not None:
+        norm = normalize_email(email)
+        if norm:
+            existing = (
+                db.query(User)
+                .filter(func.lower(User.email) == norm)
+                .filter(User.id != user.id)
+                .first()
+            )
+            if existing:
+                raise ValueError("Email already exists")
+        user.email = norm
+
     if new_password is not None:
         if not current_password:
             raise ValueError("current_password is required to change password")
@@ -98,6 +146,92 @@ def update_user_me(
     db.commit()
     db.refresh(user)
     return user
+
+
+def update_user_admin(
+    db: Session,
+    *,
+    user_id: int,
+    is_admin: Optional[bool] = None,
+    email: Optional[str] = None,
+) -> Optional[User]:
+    user = get_user(db, user_id)
+    if not user:
+        return None
+
+    if is_admin is not None:
+        user.is_admin = bool(is_admin)
+
+    if email is not None:
+        norm = normalize_email(email)
+        if norm:
+            existing = (
+                db.query(User)
+                .filter(func.lower(User.email) == norm)
+                .filter(User.id != user.id)
+                .first()
+            )
+            if existing:
+                raise ValueError("Email already exists")
+        user.email = norm
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+# ---------------------- Password reset ----------------------
+
+
+def create_password_reset_token(
+    db: Session,
+    *,
+    user: User,
+    token: str,
+    expires_at_utc: datetime,
+) -> PasswordResetToken:
+    tr = PasswordResetToken(
+        user_id=user.id,
+        token_hash=_hash_token(token),
+        expires_at_utc=expires_at_utc.replace(tzinfo=None),
+        used_at_utc=None,
+    )
+    db.add(tr)
+    db.commit()
+    db.refresh(tr)
+    return tr
+
+
+def get_password_reset_token(db: Session, *, token: str) -> Optional[PasswordResetToken]:
+    th = _hash_token(token)
+    return db.query(PasswordResetToken).options(joinedload(PasswordResetToken.user)).filter(PasswordResetToken.token_hash == th).first()
+
+
+def verify_password_reset_token(db: Session, *, token: str, now_utc: datetime) -> Optional[PasswordResetToken]:
+    tr = get_password_reset_token(db, token=token)
+    if not tr:
+        return None
+    if tr.used_at_utc is not None:
+        return None
+    if tr.expires_at_utc < now_utc.replace(tzinfo=None):
+        return None
+    return tr
+
+
+def consume_password_reset_token(db: Session, *, token: str, new_password: str, now_utc: datetime) -> bool:
+    tr = verify_password_reset_token(db, token=token, now_utc=now_utc)
+    if not tr:
+        return False
+
+    user = tr.user
+    user.hashed_password = hash_password(new_password)
+    tr.used_at_utc = now_utc.replace(tzinfo=None)
+
+    db.add(user)
+    db.add(tr)
+    db.commit()
+    return True
 
 
 # ---------------------- Tags ----------------------
@@ -197,7 +331,7 @@ def create_task(
     owner: User,
     name: str,
     task_type: str,
-    due_date: datetime,
+    due_date: datetime | None,
     description: Optional[str] = None,
     url: Optional[str] = None,
     recurrence_type: str = RecurrenceType.none.value,
@@ -205,6 +339,10 @@ def create_task(
     recurrence_times: Optional[str] = None,
     tags: Optional[Iterable[str]] = None,
 ) -> Task:
+    # Allow tasks with no due date. If omitted, use creation time.
+    if due_date is None:
+        due_date = datetime.now(timezone.utc)
+
     due_utc = normalize_datetime_to_utc_naive(due_date)
     rtype, interval_seconds, times_canonical = _apply_recurrence_fields(
         recurrence_type=recurrence_type,
@@ -250,21 +388,68 @@ def list_tasks(
     include_archived: bool = False,
     tag: Optional[str] = None,
     user_id: Optional[int] = None,
+    task_type: Optional[str] = None,
+    status: Optional[str] = None,
+    sort: str = "due_date",
 ) -> list[Task]:
-    q = db.query(Task).options(joinedload(Task.tags), joinedload(Task.user)).order_by(Task.due_date_utc.asc())
+    # Base query
+    q = db.query(Task).options(joinedload(Task.tags), joinedload(Task.user))
 
+    # Permissions and user scoping
     if current_user.is_admin:
         if user_id:
             q = q.filter(Task.user_id == int(user_id))
     else:
         q = q.filter(Task.user_id == current_user.id)
 
-    if not include_archived:
-        q = q.filter(Task.status == TaskStatus.active)
+    # Status filtering
+    if status:
+        if status == "archived":
+            q = q.filter(Task.status.in_([TaskStatus.completed, TaskStatus.deleted]))
+        else:
+            try:
+                st = TaskStatus(status)
+            except Exception as e:
+                raise ValueError("Invalid status") from e
+            q = q.filter(Task.status == st)
+    else:
+        if not include_archived:
+            q = q.filter(Task.status == TaskStatus.active)
+
+    if task_type:
+        q = q.filter(Task.task_type == task_type)
 
     if tag:
         tnorm = _normalize_tag_name(tag)
         q = q.join(Task.tags).filter(func.lower(Tag.name) == tnorm)
+
+    # Sorting
+    desc = False
+    key = (sort or "").strip()
+    if key.startswith("-"):
+        desc = True
+        key = key[1:]
+
+    if key in {"task_type", "type"}:
+        primary = Task.task_type
+        secondary = Task.due_date_utc
+    elif key in {"name"}:
+        primary = Task.name
+        secondary = Task.due_date_utc
+    elif key in {"archived_at"}:
+        # Archived sort: use completed_at_utc/deleted_at_utc where available.
+        # Fall back to updated_at.
+        # Note: SQLite lacks GREATEST across NULLs reliably; order by updated_at.
+        primary = Task.updated_at
+        secondary = Task.due_date_utc
+    else:
+        primary = Task.due_date_utc
+        secondary = Task.task_type
+
+    if desc:
+        q = q.order_by(primary.desc(), secondary.desc())
+    else:
+        q = q.order_by(primary.asc(), secondary.asc())
 
     return q.all()
 
@@ -323,6 +508,20 @@ def soft_delete_task(db: Session, *, task: Task, current_user: User, when_utc: d
 
     task.status = TaskStatus.deleted
     task.deleted_at_utc = when_utc
+
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def restore_task(db: Session, *, task: Task, current_user: User) -> Task:
+    if not current_user.is_admin and task.user_id != current_user.id:
+        raise PermissionError("Not allowed")
+
+    task.status = TaskStatus.active
+    task.completed_at_utc = None
+    task.deleted_at_utc = None
 
     db.add(task)
     db.commit()

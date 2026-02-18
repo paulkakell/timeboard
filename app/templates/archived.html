@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="h4 mb-3">Dashboard</h1>
+<h1 class="h4 mb-3">Archived Tasks</h1>
 
-<form class="row g-2 align-items-end mb-3" method="get" action="/dashboard">
+<form class="row g-2 align-items-end mb-3" method="get" action="/archived">
   <div class="col-12 col-md-3">
     <label class="form-label">Filter by Tag</label>
     <input class="form-control" type="text" name="tag" value="{{ tag_filter or '' }}" placeholder="e.g. finance">
@@ -36,7 +36,7 @@
   <div class="col-12 col-md-2">
     <label class="form-label">Sort</label>
     <select class="form-select" name="sort">
-      <option value="due_date" {% if sort == 'due_date' %}selected{% endif %}>Due Date</option>
+      <option value="archived_at" {% if sort == 'archived_at' %}selected{% endif %}>Archived Date</option>
       <option value="task_type" {% if sort == 'task_type' or sort == 'type' %}selected{% endif %}>Task Type</option>
       <option value="name" {% if sort == 'name' %}selected{% endif %}>Task Name</option>
     </select>
@@ -47,24 +47,24 @@
   </div>
 
   <div class="col-12">
-    <a class="btn btn-sm btn-outline-secondary" href="/dashboard">Reset</a>
-    <a class="btn btn-sm btn-outline-secondary" href="/archived">Archived</a>
+    <a class="btn btn-sm btn-outline-secondary" href="/archived">Reset</a>
+    <a class="btn btn-sm btn-outline-secondary" href="/dashboard">Back to Dashboard</a>
   </div>
 </form>
 
 {% if tasks|length == 0 %}
-  <div class="alert alert-info">No tasks found.</div>
+  <div class="alert alert-info">No archived tasks found.</div>
 {% else %}
   <div class="table-responsive">
     <table class="table table-hover align-middle">
       <thead>
         <tr>
           {% if current_user.is_admin and user_filter == 0 %}<th>User</th>{% endif %}
-          <th style="min-width: 120px;">Time Left</th>
+          <th style="min-width: 160px;">Archived</th>
           <th>Task Name</th>
           <th>Task Type</th>
           <th>Tags</th>
-          <th class="text-end" style="min-width: 180px;">Actions</th>
+          <th class="text-end" style="min-width: 120px;">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -72,32 +72,27 @@
           {% set t = row.task %}
           <tr>
             {% if current_user.is_admin and user_filter == 0 %}<td>{{ t.user.username }}</td>{% endif %}
-            <td class="time-left-cell {{ row.time_left_class }}">
-              <div class="fw-semibold">{{ row.time_left }}</div>
-              <div class="small text-muted">Due {{ t.due_date_utc|dt_local }}</div>
+            <td>
+              <div class="fw-semibold">{{ t.status }}</div>
+              <div class="small text-muted">{{ row.archived_at|dt_local }}</div>
             </td>
             <td>
               <div class="fw-semibold">{{ t.name }}</div>
               {% if t.description %}<div class="small text-muted">{{ t.description }}</div>{% endif %}
+              <div class="small text-muted">Due {{ t.due_date_utc|dt_local }}</div>
               {% if t.url %}<div class="small"><a href="{{ t.url }}" target="_blank" rel="noopener">{{ t.url }}</a></div>{% endif %}
             </td>
             <td>{{ t.task_type }}</td>
             <td>
               {% if t.tags %}
                 {% for tag in t.tags %}
-                  <a class="badge text-bg-secondary text-decoration-none" href="/dashboard?tag={{ tag.name }}">{{ tag.name }}</a>
+                  <span class="badge text-bg-secondary">{{ tag.name }}</span>
                 {% endfor %}
               {% endif %}
             </td>
             <td class="text-end">
-              <form method="post" action="/tasks/{{ t.id }}/complete" class="d-inline">
-                <button class="btn btn-sm btn-success" type="submit">Complete</button>
-              </form>
-              <span class="text-muted">|</span>
-              <a class="btn btn-link btn-sm p-0" href="/tasks/{{ t.id }}/edit">Update</a>
-              <span class="text-muted">|</span>
-              <form method="post" action="/tasks/{{ t.id }}/delete" class="d-inline">
-                <button class="btn btn-link btn-sm p-0 text-danger" type="submit">Delete</button>
+              <form method="post" action="/tasks/{{ t.id }}/restore" class="d-inline">
+                <button class="btn btn-sm btn-primary" type="submit">Restore</button>
               </form>
             </td>
           </tr>

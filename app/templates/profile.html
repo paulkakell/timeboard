@@ -26,6 +26,12 @@
       <div class="form-text">Archived = completed or deleted tasks.</div>
     </div>
 
+    <div class="col-12">
+      <label class="form-label">Email address (optional)</label>
+      <input class="form-control" type="email" name="email" value="{{ current_user.email or '' }}" placeholder="name@example.com">
+      <div class="form-text">If provided, the system can send overdue reminders and password reset links.</div>
+    </div>
+
     <div class="col-12"><hr></div>
 
     <div class="col-12 col-md-6">

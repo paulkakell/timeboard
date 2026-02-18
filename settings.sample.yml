@@ -16,5 +16,17 @@ purge:
   default_days: 15                # Default purge window for archived tasks (per-user override exists)
   interval_minutes: 60            # How often to purge archived tasks
 
+email:
+  enabled: false
+  # SMTP settings are optional. When disabled, password reset emails and overdue reminders are not sent.
+  smtp_host: ""                  # e.g. smtp.gmail.com
+  smtp_port: 587
+  smtp_username: ""
+  smtp_password: ""
+  smtp_from: "timeboard@localhost"
+  use_tls: true
+  reminder_interval_minutes: 60   # Hourly overdue reminders
+  reset_token_minutes: 60         # Password reset link TTL
+
 logging:
   level: "INFO"

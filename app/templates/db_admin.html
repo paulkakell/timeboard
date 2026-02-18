@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h4 mb-3">Database Export / Import</h1>
+
+{% if error %}
+  <div class="alert alert-danger" role="alert">{{ error }}</div>
+{% endif %}
+{% if success %}
+  <div class="alert alert-success" role="alert">{{ success }}</div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">Export</div>
+      <div class="card-body">
+        <p class="small text-muted">Download a JSON export of users, tasks, tags, and associations.</p>
+        <a class="btn btn-primary" href="/admin/database/export">Download JSON</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card">
+      <div class="card-header">Import</div>
+      <div class="card-body">
+        <p class="small text-muted">Importing replaces the current database contents with the uploaded JSON file.</p>
+        <form method="post" action="/admin/database/import" enctype="multipart/form-data">
+          <div class="mb-3">
+            <label class="form-label">JSON file</label>
+            <input class="form-control" type="file" name="file" accept="application/json" required>
+          </div>
+          <button class="btn btn-danger" type="submit" onclick="return confirm('Import will replace the current database contents. Continue?');">Import and Replace</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mt-3">
+  <a class="btn btn-outline-secondary" href="/admin/users">Back to Users</a>
+</div>
+{% endblock %}
