@@ -3,7 +3,7 @@ services:
     build: .
     container_name: $(CONTAINERNAME)
     ports:
-      - "$(PORT):8888"
+      - $(PORT):8888
     volumes:
       - ${CONFIG_DATA}:/data
     restart: unless-stopped
