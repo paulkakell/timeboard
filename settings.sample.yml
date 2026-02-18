@@ -30,3 +30,7 @@ email:
 
 logging:
   level: "INFO"
+                                  # Use DEBUG during development or when troubleshooting container issues.
+                                  # Use INFO for normal production operation.
+                                  # Use WARNING or higher if you want minimal log output in stable environments.
+                                  # void NOTSET unless you explicitly manage handlers and propagation elsewhere.
