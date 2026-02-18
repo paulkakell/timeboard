@@ -1,7 +1,7 @@
 networks:
-  ${NETWORK_NAME}:
-  external: true
-  name: ${NETWORK_NAME}
+  - ${NETWORK_NAME}:
+    external: true
+    name: ${NETWORK_NAME}
 services:
   timeboard:
     build: .
