@@ -11,6 +11,7 @@ from ..crud import (
     create_task,
     get_task,
     list_tasks,
+    restore_task,
     soft_delete_task,
     update_task,
 )
@@ -24,12 +25,27 @@ router = APIRouter()
 @router.get("/", response_model=list[TaskOut])
 def api_list_tasks(
     include_archived: bool = Query(default=False),
+    status: str | None = Query(default=None, description="Filter by status: active/completed/deleted/archived"),
     tag: str | None = Query(default=None),
+    task_type: str | None = Query(default=None, description="Filter by exact task_type"),
+    sort: str = Query(default="due_date", description="Sort by: due_date, task_type, name. Prefix with '-' for desc."),
     user_id: int | None = Query(default=None, description="Admin-only: filter tasks by user_id"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user_api),
 ):
-    return list_tasks(db, current_user=current_user, include_archived=include_archived, tag=tag, user_id=user_id)
+    try:
+        return list_tasks(
+            db,
+            current_user=current_user,
+            include_archived=include_archived,
+            status=status,
+            tag=tag,
+            user_id=user_id,
+            task_type=task_type,
+            sort=sort,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/", response_model=TaskOut)
@@ -140,3 +156,21 @@ def api_complete_task(
         raise HTTPException(status_code=403, detail="Not allowed")
 
     return TaskCompleteResponse(completed_task=completed, spawned_task=spawned)
+
+
+@router.post("/{task_id}/restore", response_model=TaskOut)
+def api_restore_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user_api),
+):
+    task = get_task(db, task_id=task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    try:
+        restored = restore_task(db, task=task, current_user=current_user)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    return restored

@@ -1,9 +1,18 @@
 services:
   timeboard:
     build: .
-    container_name: timeboard
+    container_name: ${CONTAINER_NAME}
+    dns:
+      - ${DNS1}
+      - ${DNS2}
+      - ${DNS3}
+      - ${DNS4}
+    environment:
+      - TZ=${TZ}
+      - PGID=${PGID}
+      - PUID=${PUID}
     ports:
-      - "8888:8888"
+      - ${PORT}:8888
+    restart: unless-stopped
     volumes:
       - ${CONFIG_DATA}:/data
-    restart: unless-stopped

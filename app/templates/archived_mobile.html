@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h5 mb-3">Archived Tasks</h1>
+
+<form class="mb-3" method="get" action="/archived">
+  <div class="mb-2">
+    <label class="form-label">Tag</label>
+    <input class="form-control" type="text" name="tag" value="{{ tag_filter or '' }}" placeholder="e.g. finance">
+  </div>
+
+  {% if current_user.is_admin %}
+  <div class="mb-2">
+    <label class="form-label">View</label>
+    <select class="form-select" name="user_id">
+      <option value="{{ current_user.id }}" {% if user_filter == current_user.id %}selected{% endif %}>My Tasks</option>
+      <option value="0" {% if user_filter == 0 %}selected{% endif %}>All Tasks</option>
+      {% for u in all_users %}
+        {% if u.id != current_user.id %}
+          <option value="{{ u.id }}" {% if user_filter == u.id %}selected{% endif %}>{{ u.username }}</option>
+        {% endif %}
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+
+  <div class="mb-2">
+    <label class="form-label">Task Type</label>
+    <select class="form-select" name="task_type">
+      <option value="" {% if not task_type_filter %}selected{% endif %}>All Types</option>
+      {% for tt in task_types %}
+        <option value="{{ tt }}" {% if task_type_filter == tt %}selected{% endif %}>{{ tt }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Sort</label>
+    <select class="form-select" name="sort">
+      <option value="archived_at" {% if sort == 'archived_at' %}selected{% endif %}>Archived Date</option>
+      <option value="task_type" {% if sort == 'task_type' or sort == 'type' %}selected{% endif %}>Task Type</option>
+      <option value="name" {% if sort == 'name' %}selected{% endif %}>Task Name</option>
+    </select>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary" type="submit">Apply</button>
+    <a class="btn btn-outline-secondary" href="/archived">Reset</a>
+    <a class="btn btn-outline-secondary" href="/dashboard">Dashboard</a>
+  </div>
+</form>
+
+{% if tasks|length == 0 %}
+  <div class="alert alert-info">No archived tasks found.</div>
+{% else %}
+  <div class="d-grid gap-2">
+    {% for row in tasks %}
+      {% set t = row.task %}
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="fw-semibold">{{ t.name }}</div>
+              <div class="small text-muted">{{ t.task_type }}</div>
+              {% if current_user.is_admin and user_filter == 0 %}
+                <div class="small text-muted">User: {{ t.user.username }}</div>
+              {% endif %}
+            </div>
+            <div class="text-end">
+              <div class="fw-semibold">{{ t.status }}</div>
+              <div class="small text-muted">{{ row.archived_at|dt_local }}</div>
+            </div>
+          </div>
+
+          {% if t.description %}
+            <div class="small mt-2">{{ t.description }}</div>
+          {% endif %}
+
+          <div class="small text-muted mt-1">Due {{ t.due_date_utc|dt_local }}</div>
+
+          {% if t.url %}
+            <div class="small mt-1"><a href="{{ t.url }}" target="_blank" rel="noopener">{{ t.url }}</a></div>
+          {% endif %}
+
+          {% if t.tags %}
+            <div class="mt-2">
+              {% for tag in t.tags %}
+                <span class="badge text-bg-secondary">{{ tag.name }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          <div class="d-flex gap-2 mt-3">
+            <form method="post" action="/tasks/{{ t.id }}/restore" class="d-inline">
+              <button class="btn btn-primary btn-sm" type="submit">Restore</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

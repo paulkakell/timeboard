@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from .models import RecurrenceType, TaskStatus, Theme
+from .models import RecurrenceType, Theme
 
 
 class Token(BaseModel):
@@ -19,11 +19,13 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8, max_length=256)
+    email: Optional[str] = Field(default=None, max_length=255)
     is_admin: bool = False
 
 
 class UserOut(UserBase):
     id: int
+    email: Optional[str] = None
     is_admin: bool
     theme: str
     purge_days: int
@@ -35,8 +37,14 @@ class UserOut(UserBase):
 class UserMeUpdate(BaseModel):
     theme: Optional[str] = Field(default=None)
     purge_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    email: Optional[str] = Field(default=None, max_length=255)
     current_password: Optional[str] = Field(default=None)
     new_password: Optional[str] = Field(default=None, min_length=8, max_length=256)
+
+
+class UserAdminUpdate(BaseModel):
+    email: Optional[str] = Field(default=None, max_length=255)
+    is_admin: Optional[bool] = Field(default=None)
 
 
 class TagOut(BaseModel):
@@ -52,7 +60,9 @@ class TaskBase(BaseModel):
     task_type: str = Field(..., min_length=1, max_length=128)
     description: Optional[str] = None
     url: Optional[str] = Field(default=None, max_length=2048)
-    due_date: datetime
+
+    # Allow tasks with no due date. If omitted, the server uses the creation time.
+    due_date: Optional[datetime] = Field(default=None)
 
     recurrence_type: str = Field(default=RecurrenceType.none.value)
     recurrence_interval: Optional[str] = Field(

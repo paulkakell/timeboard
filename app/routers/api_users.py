@@ -4,9 +4,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user_api, require_admin_api
-from ..crud import create_user, delete_user, get_user_by_username, list_users, update_user_me
+from ..crud import (
+    create_user,
+    delete_user,
+    get_user,
+    get_user_by_username,
+    list_users,
+    update_user_admin,
+    update_user_me,
+)
 from ..db import get_db
-from ..schemas import UserCreate, UserMeUpdate, UserOut
+from ..schemas import UserAdminUpdate, UserCreate, UserMeUpdate, UserOut
 
 
 router = APIRouter()
@@ -28,7 +36,37 @@ def api_create_user(
 ):
     if get_user_by_username(db, payload.username):
         raise HTTPException(status_code=400, detail="Username already exists")
-    return create_user(db, username=payload.username, password=payload.password, is_admin=payload.is_admin)
+    try:
+        return create_user(
+            db,
+            username=payload.username,
+            password=payload.password,
+            is_admin=payload.is_admin,
+            email=payload.email,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.patch("/{user_id}", response_model=UserOut)
+def api_update_user(
+    user_id: int,
+    payload: UserAdminUpdate,
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin_api),
+):
+    # Prevent demoting oneself via API by default (safety).
+    if admin.id == user_id and payload.is_admin is False:
+        raise HTTPException(status_code=400, detail="Cannot remove admin from the currently authenticated user")
+
+    try:
+        updated = update_user_admin(db, user_id=user_id, is_admin=payload.is_admin, email=payload.email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found")
+    return updated
 
 
 @router.delete("/{user_id}")
@@ -61,6 +99,7 @@ def api_update_me(
             user=current_user,
             theme=payload.theme,
             purge_days=payload.purge_days,
+            email=payload.email,
             current_password=payload.current_password,
             new_password=payload.new_password,
         )
