@@ -1,9 +1,24 @@
+networks:
+  ${NETWORK_NAME}:
+  external: true
+  name: ${NETWORK_NAME}
 services:
   timeboard:
     build: .
     container_name: ${CONTAINER_NAME}
-    ports: 
+    dns:
+      - ${DNS1}
+      - ${DNS2}
+      - ${DNS3}
+      - ${DNS4}
+    environment:
+      - TZ=${TZ}
+      - PGID=${PGID}
+      - PUID=${PUID}
+    networks:
+      - ${NETWORK_NAME}
+    ports:
       - ${PORT}:8888
+    restart: unless-stopped
     volumes:
       - ${CONFIG_DATA}:/data
-    restart: unless-stopped
