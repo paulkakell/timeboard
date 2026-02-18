@@ -1,5 +1,5 @@
 networks:
-  - ${NETWORK_NAME}:
+  ${NETWORK_NAME}:
     external: true
     name: ${NETWORK_NAME}
 services:
