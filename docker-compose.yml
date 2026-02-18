@@ -1,9 +1,9 @@
 services:
   timeboard:
     build: .
-    container_name: $(CONTAINER_NAME)
+    container_name: ${CONTAINER_NAME}
     ports: 
-      - $(PORT):8888
+      - ${PORT}:8888
     volumes:
       - ${CONFIG_DATA}:/data
     restart: unless-stopped
