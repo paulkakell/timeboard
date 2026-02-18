@@ -1,7 +1,3 @@
-networks:
-  ${NETWORK_NAME}:
-    external: true
-    name: ${NETWORK_NAME}
 services:
   timeboard:
     build: .
@@ -15,8 +11,6 @@ services:
       - TZ=${TZ}
       - PGID=${PGID}
       - PUID=${PUID}
-    networks:
-      - ${NETWORK_NAME}
     ports:
       - ${PORT}:8888
     restart: unless-stopped
