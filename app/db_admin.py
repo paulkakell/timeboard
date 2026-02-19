@@ -1,17 +1,62 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Dict, List
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .models import AppMeta, Tag, Task, TaskTag, User
+from .crud import normalize_email
+from .models import AppMeta, RecurrenceType, Tag, Task, TaskStatus, TaskTag, Theme, User
 from .version import APP_VERSION
+
+
+DEFAULT_BACKUPS_DIR = Path("/data/backups")
 
 
 def _dt(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
+
+
+def _timestamp_utc(now: datetime | None = None) -> str:
+    n = now or datetime.utcnow().replace(tzinfo=None)
+    return n.strftime("%Y%m%dT%H%M%SZ")
+
+
+def _parse_datetime(value: Any, *, field: str) -> datetime | None:
+    """Parse a datetime from common JSON export formats.
+
+    The database stores naive UTC datetimes.
+
+    Accepts:
+    - None
+    - datetime
+    - ISO8601 strings, with optional timezone offsets or trailing 'Z'
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        # tolerate trailing Z
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+    else:
+        raise ValueError(f"{field} must be an ISO8601 string")
+
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    else:
+        dt = dt.replace(tzinfo=None)
+
+    return dt
 
 
 def export_db_json(db: Session) -> Dict[str, Any]:
@@ -78,11 +123,308 @@ def export_db_json(db: Session) -> Dict[str, Any]:
     }
 
 
+def write_backup_json(
+    data: Dict[str, Any],
+    *,
+    prefix: str,
+    backups_dir: Path = DEFAULT_BACKUPS_DIR,
+) -> Path:
+    """Write a JSON backup file to disk.
+
+    The filename includes `prefix` and a UTC timestamp.
+
+    Returns the final backup path.
+    """
+    backups_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_prefix = "".join([c for c in (prefix or "").upper() if c.isalnum() or c in {"-", "_"}]) or "BACKUP"
+    ts = _timestamp_utc()
+    filename = f"timeboard-{safe_prefix}-{ts}.json"
+
+    final_path = backups_dir / filename
+    tmp_path = backups_dir / f".{filename}.tmp"
+
+    # Add minimal metadata to backups (does not affect import).
+    payload = dict(data)
+    payload.setdefault("backup_type", safe_prefix)
+    payload.setdefault("backup_written_at_utc", datetime.utcnow().replace(tzinfo=None).isoformat())
+
+    tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp_path.replace(final_path)
+    return final_path
+
+
+def backup_database_json(
+    db: Session,
+    *,
+    prefix: str,
+    backups_dir: Path = DEFAULT_BACKUPS_DIR,
+) -> Path:
+    """Create a JSON backup of the current database."""
+    data = export_db_json(db)
+    return write_backup_json(data, prefix=prefix, backups_dir=backups_dir)
+
+
+def validate_import_payload(payload: Any) -> Tuple[List[str], List[str]]:
+    """Validate an import JSON payload.
+
+    Returns (errors, warnings).
+
+    Validation is intentionally strict so imports fail *before* any database
+    changes are applied.
+    """
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    if not isinstance(payload, dict):
+        return (["Root JSON must be an object"], warnings)
+
+    users = payload.get("users")
+    tags = payload.get("tags")
+    tasks = payload.get("tasks")
+    task_tags = payload.get("task_tags")
+
+    if not isinstance(users, list):
+        errors.append("Missing or invalid 'users' list")
+    if not isinstance(tags, list):
+        errors.append("Missing or invalid 'tags' list")
+    if not isinstance(tasks, list):
+        errors.append("Missing or invalid 'tasks' list")
+    if not isinstance(task_tags, list):
+        errors.append("Missing or invalid 'task_tags' list")
+
+    db_meta = payload.get("db_meta")
+    if db_meta is not None and not isinstance(db_meta, dict):
+        warnings.append("'db_meta' should be an object; ignoring")
+
+    src_version = payload.get("app_version")
+    if src_version is not None and not isinstance(src_version, str):
+        warnings.append("'app_version' should be a string")
+    elif isinstance(src_version, str) and src_version.strip() and src_version.strip() != APP_VERSION:
+        warnings.append(f"Import file app_version is {src_version.strip()} (current app is {APP_VERSION})")
+
+    if errors:
+        return errors, warnings
+
+    allowed_themes = {Theme.light.value, Theme.dark.value, Theme.system.value}
+    allowed_statuses = {s.value for s in TaskStatus}
+    allowed_recurrence = {r.value for r in RecurrenceType}
+
+    # ---- users ----
+    user_ids: set[int] = set()
+    usernames: set[str] = set()
+    emails: set[str] = set()
+    admin_count = 0
+
+    for i, u in enumerate(users):
+        ctx = f"users[{i}]"
+        if not isinstance(u, dict):
+            errors.append(f"{ctx}: must be an object")
+            continue
+
+        # id
+        try:
+            uid = int(u.get("id"))
+        except Exception:
+            errors.append(f"{ctx}: 'id' must be an integer")
+            continue
+
+        if uid in user_ids:
+            errors.append(f"{ctx}: duplicate user id {uid}")
+        user_ids.add(uid)
+
+        username = str(u.get("username") or "").strip()
+        if not username:
+            errors.append(f"{ctx}: 'username' is required")
+        elif username in usernames:
+            errors.append(f"{ctx}: duplicate username '{username}'")
+        else:
+            usernames.add(username)
+
+        hp = str(u.get("hashed_password") or "").strip()
+        if not hp:
+            errors.append(f"{ctx}: 'hashed_password' is required")
+
+        is_admin = bool(u.get("is_admin", False))
+        if is_admin:
+            admin_count += 1
+
+        email_norm = normalize_email(u.get("email"))
+        if not is_admin and not email_norm:
+            errors.append(f"{ctx}: email is required for non-admin users")
+        if email_norm:
+            if email_norm in emails:
+                errors.append(f"{ctx}: duplicate email '{email_norm}'")
+            emails.add(email_norm)
+
+        theme = u.get("theme")
+        if theme is not None:
+            theme_str = str(theme)
+            if theme_str not in allowed_themes:
+                warnings.append(f"{ctx}: unknown theme '{theme_str}'")
+
+        purge_days = u.get("purge_days")
+        if purge_days is not None:
+            try:
+                pd = int(purge_days)
+                if pd < 1 or pd > 3650:
+                    warnings.append(f"{ctx}: purge_days {pd} is out of range (1-3650)")
+            except Exception:
+                warnings.append(f"{ctx}: purge_days should be an integer")
+
+        # created_at / updated_at
+        for dt_field in ("created_at", "updated_at"):
+            if u.get(dt_field) is None:
+                continue
+            try:
+                _parse_datetime(u.get(dt_field), field=f"{ctx}.{dt_field}")
+            except Exception:
+                errors.append(f"{ctx}: '{dt_field}' is not a valid ISO8601 datetime")
+
+    if admin_count == 0:
+        warnings.append("No admin users found in import; an admin account will be auto-created on the next login attempt")
+
+    # ---- tags ----
+    tag_ids: set[int] = set()
+    tag_names: set[str] = set()
+
+    for i, t in enumerate(tags):
+        ctx = f"tags[{i}]"
+        if not isinstance(t, dict):
+            errors.append(f"{ctx}: must be an object")
+            continue
+
+        try:
+            tid = int(t.get("id"))
+        except Exception:
+            errors.append(f"{ctx}: 'id' must be an integer")
+            continue
+
+        if tid in tag_ids:
+            errors.append(f"{ctx}: duplicate tag id {tid}")
+        tag_ids.add(tid)
+
+        name = str(t.get("name") or "").strip()
+        if not name:
+            errors.append(f"{ctx}: 'name' is required")
+            continue
+
+        name_norm = name.strip().lower()
+        if name_norm in tag_names:
+            errors.append(f"{ctx}: duplicate tag name '{name}'")
+        tag_names.add(name_norm)
+
+    # ---- tasks ----
+    task_ids: set[int] = set()
+
+    for i, t in enumerate(tasks):
+        ctx = f"tasks[{i}]"
+        if not isinstance(t, dict):
+            errors.append(f"{ctx}: must be an object")
+            continue
+
+        try:
+            tid = int(t.get("id"))
+        except Exception:
+            errors.append(f"{ctx}: 'id' must be an integer")
+            continue
+
+        if tid in task_ids:
+            errors.append(f"{ctx}: duplicate task id {tid}")
+        task_ids.add(tid)
+
+        try:
+            uid = int(t.get("user_id"))
+        except Exception:
+            errors.append(f"{ctx}: 'user_id' must be an integer")
+            continue
+
+        if uid not in user_ids:
+            errors.append(f"{ctx}: user_id {uid} does not exist in users list")
+
+        name = str(t.get("name") or "").strip()
+        if not name:
+            errors.append(f"{ctx}: 'name' is required")
+
+        task_type = str(t.get("task_type") or "").strip()
+        if not task_type:
+            errors.append(f"{ctx}: 'task_type' is required")
+
+        rec = str(t.get("recurrence_type") or RecurrenceType.none.value)
+        if rec not in allowed_recurrence:
+            errors.append(f"{ctx}: recurrence_type '{rec}' is invalid")
+
+        status = str(t.get("status") or TaskStatus.active.value)
+        if status not in allowed_statuses:
+            errors.append(f"{ctx}: status '{status}' is invalid")
+
+        # Required datetime fields
+        for dt_field in ("due_date_utc", "created_at", "updated_at"):
+            if not t.get(dt_field):
+                errors.append(f"{ctx}: '{dt_field}' is required")
+                continue
+            try:
+                _parse_datetime(t.get(dt_field), field=f"{ctx}.{dt_field}")
+            except Exception:
+                errors.append(f"{ctx}: '{dt_field}' is not a valid ISO8601 datetime")
+
+        # Optional datetime fields
+        for dt_field in ("completed_at_utc", "deleted_at_utc"):
+            if not t.get(dt_field):
+                continue
+            try:
+                _parse_datetime(t.get(dt_field), field=f"{ctx}.{dt_field}")
+            except Exception:
+                errors.append(f"{ctx}: '{dt_field}' is not a valid ISO8601 datetime")
+
+        # recurrence_interval_seconds
+        if t.get("recurrence_interval_seconds") is not None:
+            try:
+                int(t.get("recurrence_interval_seconds"))
+            except Exception:
+                errors.append(f"{ctx}: recurrence_interval_seconds must be an integer")
+
+    # ---- task_tags ----
+    assoc: set[tuple[int, int]] = set()
+
+    for i, a in enumerate(task_tags):
+        ctx = f"task_tags[{i}]"
+        if not isinstance(a, dict):
+            errors.append(f"{ctx}: must be an object")
+            continue
+
+        try:
+            task_id = int(a.get("task_id"))
+            tag_id = int(a.get("tag_id"))
+        except Exception:
+            errors.append(f"{ctx}: task_id and tag_id must be integers")
+            continue
+
+        if task_id not in task_ids:
+            errors.append(f"{ctx}: task_id {task_id} does not exist in tasks list")
+        if tag_id not in tag_ids:
+            errors.append(f"{ctx}: tag_id {tag_id} does not exist in tags list")
+
+        key = (task_id, tag_id)
+        if key in assoc:
+            errors.append(f"{ctx}: duplicate association task_id={task_id} tag_id={tag_id}")
+        assoc.add(key)
+
+    return errors, warnings
+
+
 def import_db_json(db: Session, payload: Dict[str, Any], *, replace: bool = True) -> None:
     """Import a JSON export into the database.
 
     By default this *replaces* existing data.
+
+    Import is performed as a single transaction. If any error occurs, the
+    transaction is rolled back so the existing database contents remain intact.
     """
+    errors, _warnings = validate_import_payload(payload)
+    if errors:
+        raise ValueError("Import validation failed: " + "; ".join(errors))
+
     if not isinstance(payload, dict):
         raise ValueError("Invalid import payload")
 
@@ -95,77 +437,106 @@ def import_db_json(db: Session, payload: Dict[str, Any], *, replace: bool = True
     if not isinstance(users, list) or not isinstance(tags, list) or not isinstance(tasks, list) or not isinstance(task_tags, list):
         raise ValueError("Invalid import payload structure")
 
-    if replace:
-        # Delete in dependency order.
-        db.execute(text("DELETE FROM task_tags"))
-        db.execute(text("DELETE FROM tasks"))
-        db.execute(text("DELETE FROM tags"))
-        db.execute(text("DELETE FROM users"))
-        db.execute(text("DELETE FROM app_meta"))
+    try:
+        if replace:
+            # Delete in dependency order.
+            db.execute(text("DELETE FROM task_tags"))
+            db.execute(text("DELETE FROM tasks"))
+            db.execute(text("DELETE FROM tags"))
+            db.execute(text("DELETE FROM users"))
+            db.execute(text("DELETE FROM app_meta"))
+
+        # Insert users
+        for u in users:
+            if not isinstance(u, dict):
+                continue
+
+            is_admin = bool(u.get("is_admin", False))
+            email_norm = normalize_email(u.get("email"))
+            if not is_admin and not email_norm:
+                raise ValueError(f"User '{u.get('username')}' is missing email (required for non-admin users)")
+
+            created_at = _parse_datetime(u.get("created_at"), field="users.created_at") or datetime.utcnow().replace(tzinfo=None)
+            updated_at = _parse_datetime(u.get("updated_at"), field="users.updated_at") or datetime.utcnow().replace(tzinfo=None)
+
+            theme = str(u.get("theme") or Theme.system.value)
+            if theme not in {Theme.light.value, Theme.dark.value, Theme.system.value}:
+                theme = Theme.system.value
+
+            db.add(
+                User(
+                    id=int(u["id"]),
+                    username=str(u["username"]).strip(),
+                    email=email_norm,
+                    hashed_password=str(u["hashed_password"]),
+                    is_admin=is_admin,
+                    theme=theme,
+                    purge_days=int(u.get("purge_days") or 15),
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        db.flush()
+
+        # Insert tags
+        for t in tags:
+            if not isinstance(t, dict):
+                continue
+            db.add(Tag(id=int(t["id"]), name=str(t["name"]).strip()))
+        db.flush()
+
+        # Insert tasks
+        for t in tasks:
+            if not isinstance(t, dict):
+                continue
+
+            due_dt = _parse_datetime(t.get("due_date_utc"), field="tasks.due_date_utc")
+            if due_dt is None:
+                raise ValueError(f"Task '{t.get('name')}' is missing due_date_utc")
+
+            created_at = _parse_datetime(t.get("created_at"), field="tasks.created_at") or datetime.utcnow().replace(tzinfo=None)
+            updated_at = _parse_datetime(t.get("updated_at"), field="tasks.updated_at") or datetime.utcnow().replace(tzinfo=None)
+
+            db.add(
+                Task(
+                    id=int(t["id"]),
+                    user_id=int(t["user_id"]),
+                    name=str(t["name"]).strip(),
+                    task_type=str(t["task_type"]).strip(),
+                    description=t.get("description"),
+                    url=t.get("url"),
+                    due_date_utc=due_dt,
+                    recurrence_type=str(t.get("recurrence_type") or RecurrenceType.none.value),
+                    recurrence_interval_seconds=(
+                        None
+                        if t.get("recurrence_interval_seconds") is None
+                        else int(t.get("recurrence_interval_seconds"))
+                    ),
+                    recurrence_times=t.get("recurrence_times"),
+                    status=str(t.get("status") or TaskStatus.active.value),
+                    completed_at_utc=_parse_datetime(t.get("completed_at_utc"), field="tasks.completed_at_utc"),
+                    deleted_at_utc=_parse_datetime(t.get("deleted_at_utc"), field="tasks.deleted_at_utc"),
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            )
+        db.flush()
+
+        # Insert associations
+        for a in task_tags:
+            if not isinstance(a, dict):
+                continue
+            db.execute(TaskTag.insert().values(task_id=int(a["task_id"]), tag_id=int(a["tag_id"])))
+
+        # Restore app_meta
+        if isinstance(db_meta, dict):
+            for k, v in db_meta.items():
+                if k is None or v is None:
+                    continue
+                db.add(AppMeta(key=str(k), value=str(v)))
+
         db.commit()
 
-    # Insert users
-    for u in users:
-        if not isinstance(u, dict):
-            continue
-        db.add(
-            User(
-                id=int(u["id"]),
-                username=str(u["username"]),
-                email=u.get("email"),
-                hashed_password=str(u["hashed_password"]),
-                is_admin=bool(u.get("is_admin", False)),
-                theme=str(u.get("theme") or "system"),
-                purge_days=int(u.get("purge_days") or 15),
-                created_at=datetime.fromisoformat(u["created_at"]) if u.get("created_at") else datetime.utcnow(),
-                updated_at=datetime.fromisoformat(u["updated_at"]) if u.get("updated_at") else datetime.utcnow(),
-            )
-        )
-    db.flush()
-
-    # Insert tags
-    for t in tags:
-        if not isinstance(t, dict):
-            continue
-        db.add(Tag(id=int(t["id"]), name=str(t["name"])))
-    db.flush()
-
-    # Insert tasks
-    for t in tasks:
-        if not isinstance(t, dict):
-            continue
-        db.add(
-            Task(
-                id=int(t["id"]),
-                user_id=int(t["user_id"]),
-                name=str(t["name"]),
-                task_type=str(t["task_type"]),
-                description=t.get("description"),
-                url=t.get("url"),
-                due_date_utc=datetime.fromisoformat(t["due_date_utc"]) if t.get("due_date_utc") else datetime.utcnow(),
-                recurrence_type=str(t.get("recurrence_type") or "none"),
-                recurrence_interval_seconds=t.get("recurrence_interval_seconds"),
-                recurrence_times=t.get("recurrence_times"),
-                status=str(t.get("status") or "active"),
-                completed_at_utc=datetime.fromisoformat(t["completed_at_utc"]) if t.get("completed_at_utc") else None,
-                deleted_at_utc=datetime.fromisoformat(t["deleted_at_utc"]) if t.get("deleted_at_utc") else None,
-                created_at=datetime.fromisoformat(t["created_at"]) if t.get("created_at") else datetime.utcnow(),
-                updated_at=datetime.fromisoformat(t["updated_at"]) if t.get("updated_at") else datetime.utcnow(),
-            )
-        )
-    db.flush()
-
-    # Insert associations
-    for a in task_tags:
-        if not isinstance(a, dict):
-            continue
-        db.execute(TaskTag.insert().values(task_id=int(a["task_id"]), tag_id=int(a["tag_id"])))
-
-    # Restore app_meta
-    if isinstance(db_meta, dict):
-        for k, v in db_meta.items():
-            if k is None or v is None:
-                continue
-            db.add(AppMeta(key=str(k), value=str(v)))
-
-    db.commit()
+    except Exception:
+        db.rollback()
+        raise

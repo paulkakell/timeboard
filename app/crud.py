@@ -74,14 +74,27 @@ def create_user(
 ) -> User:
     settings = get_settings()
 
+    uname = (username or "").strip()
+    if not uname:
+        raise ValueError("Username is required")
+
+    existing_username = db.query(User).filter(User.username == uname).first()
+    if existing_username:
+        raise ValueError("Username already exists")
+
     norm_email = normalize_email(email)
+
+    # Email is required for all non-admin users.
+    if not bool(is_admin) and not norm_email:
+        raise ValueError("Email is required for non-admin users")
+
     if norm_email:
         existing = db.query(User).filter(func.lower(User.email) == norm_email).first()
         if existing:
             raise ValueError("Email already exists")
 
     user = User(
-        username=username,
+        username=uname,
         email=norm_email,
         hashed_password=hash_password(password),
         is_admin=bool(is_admin),
@@ -122,8 +135,13 @@ def update_user_me(
             raise ValueError("purge_days must be between 1 and 3650")
         user.purge_days = int(purge_days)
 
+    # Email is required for all non-admin users.
+    new_email = normalize_email(email) if email is not None else user.email
+    if not bool(user.is_admin) and not new_email:
+        raise ValueError("Email is required for non-admin users")
+
     if email is not None:
-        norm = normalize_email(email)
+        norm = new_email
         if norm:
             existing = (
                 db.query(User)
@@ -148,6 +166,7 @@ def update_user_me(
     return user
 
 
+
 def update_user_admin(
     db: Session,
     *,
@@ -159,11 +178,15 @@ def update_user_admin(
     if not user:
         return None
 
-    if is_admin is not None:
-        user.is_admin = bool(is_admin)
+    new_is_admin = bool(is_admin) if is_admin is not None else bool(user.is_admin)
+    new_email = normalize_email(email) if email is not None else user.email
+
+    # Email is required for all non-admin users.
+    if not new_is_admin and not new_email:
+        raise ValueError("Email is required for non-admin users")
 
     if email is not None:
-        norm = normalize_email(email)
+        norm = new_email
         if norm:
             existing = (
                 db.query(User)
@@ -174,6 +197,9 @@ def update_user_admin(
             if existing:
                 raise ValueError("Email already exists")
         user.email = norm
+
+    if is_admin is not None:
+        user.is_admin = bool(is_admin)
 
     db.add(user)
     db.commit()
