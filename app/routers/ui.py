@@ -34,8 +34,8 @@ from ..crud import (
     update_user_admin,
     update_user_me,
 )
-from ..db import get_db
-from ..db_admin import export_db_json, import_db_json
+from ..db import SessionLocal, get_db
+from ..db_admin import backup_database_json, export_db_json, import_db_json, validate_import_payload
 from ..emailer import build_password_reset_email, email_enabled, send_email
 from ..models import RecurrenceType, Task, TaskStatus, Theme, User
 from ..utils.humanize import humanize_timedelta, time_left_class, seconds_to_duration_str
@@ -232,6 +232,13 @@ def login_get(request: Request, db: Session = Depends(get_db)):
         return _redirect("/dashboard")
 
     success = request.query_params.get("success")
+
+    success_msg = None
+    if success == "reset":
+        success_msg = "Password updated. You can sign in."
+    elif success == "import":
+        success_msg = "Import complete. Please sign in again."
+
     return templates.TemplateResponse(
         "login.html",
         _template_context(
@@ -239,7 +246,7 @@ def login_get(request: Request, db: Session = Depends(get_db)):
             user,
             db=db,
             error=None,
-            success=("Password updated. You can sign in." if success == "reset" else None),
+            success=success_msg,
         ),
     )
 
@@ -1066,33 +1073,89 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
     if not user.is_admin:
         return _redirect("/dashboard")
 
+    # Always create a pre-import backup on any import attempt.
+    backup_note: list[str] = []
+    try:
+        bdb = SessionLocal()
+        try:
+            backup_path = backup_database_json(bdb, prefix="IMPORT")
+            backup_note.append(f"Pre-import backup created: {backup_path.name}")
+        finally:
+            bdb.close()
+    except Exception:
+        logger.exception("Failed to create pre-import IMPORT backup")
+
+    # Parse uploaded JSON.
     try:
         raw = file.file.read()
         payload = json.loads(raw.decode("utf-8"))
-        import_db_json(db, payload, replace=True)
     except Exception as e:
+        # Ensure the session is usable for template rendering.
+        try:
+            db.rollback()
+        except Exception:
+            pass
         return templates.TemplateResponse(
             "db_admin.html",
             _template_context(
                 request,
                 user,
                 db=db,
-                error=f"Import failed: {e}",
+                errors=[f"Invalid JSON file: {e}"],
+                warnings=backup_note,
+                error=None,
                 success=None,
             ),
             status_code=400,
         )
 
-    return templates.TemplateResponse(
-        "db_admin.html",
-        _template_context(
-            request,
-            user,
-            db=db,
-            error=None,
-            success="Import complete",
-        ),
-    )
+    errors, warnings = validate_import_payload(payload)
+    warnings_all = backup_note + list(warnings or [])
+
+    if errors:
+        return templates.TemplateResponse(
+            "db_admin.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                errors=errors,
+                warnings=warnings_all,
+                error=None,
+                success=None,
+            ),
+            status_code=400,
+        )
+
+    try:
+        import_db_json(db, payload, replace=True)
+    except Exception as e:
+        # Reset the session transaction so the UI can continue to function.
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return templates.TemplateResponse(
+            "db_admin.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                errors=[f"Import failed: {e}"],
+                warnings=warnings_all,
+                error=None,
+                success=None,
+            ),
+            status_code=400,
+        )
+
+    # Import replaces the database; clear the session to avoid user-id drift.
+    try:
+        request.session.clear()
+    except Exception:
+        pass
+
+    return _redirect("/login?success=import")
 
 
 @router.get("/help", response_class=HTMLResponse)

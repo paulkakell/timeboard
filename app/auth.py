@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import secrets
+
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -12,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from .config import get_settings
 from .db import get_db
-from .models import User
+from .models import Theme, User
 
 
 # Use PBKDF2-SHA256 instead of bcrypt.
@@ -41,7 +44,73 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
+logger = logging.getLogger("timeboard.auth")
+
+
+def ensure_admin_user(db: Session) -> None:
+    """Ensure at least one admin account exists.
+
+    This is intentionally called during login attempts so deployments that lose
+    their admin user (e.g., via a failed import) can self-heal.
+
+    If no admin user exists:
+    - If a user with username 'admin' exists, promote it to admin and reset its password.
+    - Otherwise, create a new 'admin' user.
+
+    The randomized password is written to the container logs.
+    """
+    try:
+        existing_admin = db.query(User).filter(User.is_admin.is_(True)).first()
+        if existing_admin:
+            return
+
+        admin_password = secrets.token_urlsafe(12)
+
+        existing_admin_username = db.query(User).filter(User.username == "admin").first()
+        if existing_admin_username:
+            existing_admin_username.is_admin = True
+            existing_admin_username.hashed_password = hash_password(admin_password)
+            db.add(existing_admin_username)
+            db.commit()
+
+            logger.warning("============================================================")
+            logger.warning("Timeboard admin recovery: existing 'admin' user promoted")
+            logger.warning("Username: admin")
+            logger.warning("Password: %s", admin_password)
+            logger.warning("Please log in and change this password.")
+            logger.warning("============================================================")
+            return
+
+        settings = get_settings()
+        u = User(
+            username="admin",
+            email=None,
+            hashed_password=hash_password(admin_password),
+            is_admin=True,
+            purge_days=int(settings.purge.default_days),
+            theme=Theme.system.value,
+        )
+        db.add(u)
+        db.commit()
+
+        logger.warning("============================================================")
+        logger.warning("Timeboard admin recovery: new admin user created")
+        logger.warning("Username: admin")
+        logger.warning("Password: %s", admin_password)
+        logger.warning("Please log in and change this password.")
+        logger.warning("============================================================")
+
+    except Exception:
+        # Never block login flows on recovery failures.
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.exception("Failed to auto-create admin user on login attempt")
+
+
 def authenticate_user(db: Session, username_or_email: str, password: str) -> Optional[User]:
+    ensure_admin_user(db)
     ident = (username_or_email or "").strip()
     if not ident:
         return None

@@ -13,6 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .config import get_settings
 from .crud import create_user, purge_archived_tasks
+from .db_admin import backup_database_json
 from .db import Base, SessionLocal, engine
 from .emailer import build_overdue_reminder_email, email_enabled, send_email
 from .migrations import ensure_db_schema
@@ -169,6 +170,28 @@ def on_startup() -> None:
         replace_existing=True,
     )
 
+
+
+    def _daily_backup_job() -> None:
+        dbj = SessionLocal()
+        try:
+            path = backup_database_json(dbj, prefix="DAILY")
+            logger.info("Daily backup written: %s", path)
+        except Exception:
+            logger.exception("Error while creating daily backup")
+        finally:
+            dbj.close()
+
+    # Daily JSON backup at 12:00am in the configured app timezone.
+    scheduler.add_job(
+        _daily_backup_job,
+        "cron",
+        hour=0,
+        minute=0,
+        timezone=settings.app.timezone,
+        id="daily_backup",
+        replace_existing=True,
+    )
     scheduler.start()
 
 
