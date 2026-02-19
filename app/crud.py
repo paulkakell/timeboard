@@ -119,12 +119,24 @@ def update_user_me(
     db: Session,
     *,
     user: User,
+    username: Optional[str] = None,
     theme: Optional[str] = None,
     purge_days: Optional[int] = None,
     email: Optional[str] = None,
     current_password: Optional[str] = None,
     new_password: Optional[str] = None,
 ) -> User:
+    if username is not None:
+        uname = (username or "").strip()
+        if not uname:
+            raise ValueError("Username is required")
+        if len(uname) > 64:
+            raise ValueError("Username must be 64 characters or less")
+        existing_username = db.query(User).filter(User.username == uname).filter(User.id != user.id).first()
+        if existing_username:
+            raise ValueError("Username already exists")
+        user.username = uname
+
     if theme is not None:
         if theme not in {Theme.light.value, Theme.dark.value, Theme.system.value}:
             raise ValueError("Invalid theme")
@@ -171,12 +183,37 @@ def update_user_admin(
     db: Session,
     *,
     user_id: int,
+    username: Optional[str] = None,
     is_admin: Optional[bool] = None,
     email: Optional[str] = None,
+    theme: Optional[str] = None,
+    purge_days: Optional[int] = None,
+    new_password: Optional[str] = None,
 ) -> Optional[User]:
     user = get_user(db, user_id)
     if not user:
         return None
+
+    if username is not None:
+        uname = (username or "").strip()
+        if not uname:
+            raise ValueError("Username is required")
+        if len(uname) > 64:
+            raise ValueError("Username must be 64 characters or less")
+        existing_username = db.query(User).filter(User.username == uname).filter(User.id != user.id).first()
+        if existing_username:
+            raise ValueError("Username already exists")
+        user.username = uname
+
+    if theme is not None:
+        if theme not in {Theme.light.value, Theme.dark.value, Theme.system.value}:
+            raise ValueError("Invalid theme")
+        user.theme = theme
+
+    if purge_days is not None:
+        if purge_days < 1 or purge_days > 3650:
+            raise ValueError("purge_days must be between 1 and 3650")
+        user.purge_days = int(purge_days)
 
     new_is_admin = bool(is_admin) if is_admin is not None else bool(user.is_admin)
     new_email = normalize_email(email) if email is not None else user.email
@@ -200,6 +237,11 @@ def update_user_admin(
 
     if is_admin is not None:
         user.is_admin = bool(is_admin)
+
+    if new_password is not None:
+        if len(new_password or "") < 8:
+            raise ValueError("Password must be at least 8 characters")
+        user.hashed_password = hash_password(new_password)
 
     db.add(user)
     db.commit()

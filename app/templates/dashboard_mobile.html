@@ -66,8 +66,10 @@
               {% endif %}
             </div>
             <div class="text-end">
-              <div class="fw-semibold {{ row.time_left_class }}">{{ row.time_left }}</div>
-              <div class="small text-muted">Due {{ t.due_date_utc|dt_local }}</div>
+              <div class="time-left-cell {{ row.time_left_class }} text-end px-2 py-1 d-inline-block">
+                <div class="fw-semibold">{{ row.time_left }}</div>
+                <div class="small text-muted">Due {{ t.due_date_utc|dt_local }}</div>
+              </div>
             </div>
           </div>
 

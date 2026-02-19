@@ -24,6 +24,7 @@ from ..crud import (
     delete_user,
     get_password_reset_token,
     get_task,
+    get_user,
     get_user_by_email,
     get_user_by_username,
     list_tasks,
@@ -877,6 +878,7 @@ def profile_get(request: Request, db: Session = Depends(get_db)):
 @router.post("/profile", response_class=HTMLResponse)
 def profile_post(
     request: Request,
+    username: str = Form(...),
     theme: str = Form(Theme.system.value),
     purge_days: int = Form(...),
     email: str = Form(""),
@@ -892,6 +894,7 @@ def profile_post(
         update_user_me(
             db,
             user=user,
+            username=username,
             theme=theme,
             purge_days=int(purge_days),
             email=email,
@@ -942,6 +945,112 @@ def admin_users_get(request: Request, db: Session = Depends(get_db)):
             error=None,
         ),
     )
+
+
+@router.get("/admin/users/{user_id}/edit", response_class=HTMLResponse)
+def admin_users_edit_get(request: Request, user_id: int, db: Session = Depends(get_db)):
+    admin = _get_current_user(request, db)
+    if not admin:
+        return _redirect("/login")
+    if not admin.is_admin:
+        return _redirect("/dashboard")
+
+    target = get_user(db, user_id=user_id)
+    if not target:
+        return _redirect("/admin/users")
+
+    return templates.TemplateResponse(
+        "user_edit.html",
+        _template_context(
+            request,
+            admin,
+            db=db,
+            target=target,
+            error=None,
+            success=None,
+        ),
+    )
+
+
+@router.post("/admin/users/{user_id}/edit", response_class=HTMLResponse)
+def admin_users_edit_post(
+    request: Request,
+    user_id: int,
+    username: str = Form(...),
+    email: str = Form(""),
+    is_admin: bool = Form(False),
+    theme: str = Form(Theme.system.value),
+    purge_days: int = Form(...),
+    new_password: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    admin = _get_current_user(request, db)
+    if not admin:
+        return _redirect("/login")
+    if not admin.is_admin:
+        return _redirect("/dashboard")
+
+    target = get_user(db, user_id=user_id)
+    if not target:
+        return _redirect("/admin/users")
+
+    if admin.id == user_id and not bool(is_admin):
+        return templates.TemplateResponse(
+            "user_edit.html",
+            _template_context(
+                request,
+                admin,
+                db=db,
+                target=target,
+                error="Cannot remove admin from the currently authenticated user",
+                success=None,
+            ),
+            status_code=400,
+        )
+
+    try:
+        update_user_admin(
+            db,
+            user_id=user_id,
+            username=username,
+            email=email,
+            is_admin=bool(is_admin),
+            theme=theme,
+            purge_days=int(purge_days),
+            new_password=(new_password or None),
+        )
+        db.refresh(target)
+        return templates.TemplateResponse(
+            "user_edit.html",
+            _template_context(
+                request,
+                admin,
+                db=db,
+                target=target,
+                error=None,
+                success="Saved",
+            ),
+        )
+    except Exception as e:
+        return templates.TemplateResponse(
+            "user_edit.html",
+            _template_context(
+                request,
+                admin,
+                db=db,
+                target={
+                    "id": target.id,
+                    "username": username,
+                    "email": email,
+                    "is_admin": bool(is_admin),
+                    "theme": theme,
+                    "purge_days": purge_days,
+                },
+                error=str(e),
+                success=None,
+            ),
+            status_code=400,
+        )
 
 
 @router.post("/admin/users/create", response_class=HTMLResponse)

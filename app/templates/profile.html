@@ -11,6 +11,11 @@
 
 <form method="post" class="card card-body">
   <div class="row g-3">
+    <div class="col-12">
+      <label class="form-label">Username</label>
+      <input class="form-control" type="text" name="username" value="{{ current_user.username }}" required>
+    </div>
+
     <div class="col-12 col-md-6">
       <label class="form-label">Theme</label>
       <select class="form-select" name="theme">

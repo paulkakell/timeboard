@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h4 mb-3">Edit User</h1>
+
+{% if error %}
+  <div class="alert alert-danger" role="alert">{{ error }}</div>
+{% endif %}
+{% if success %}
+  <div class="alert alert-success" role="alert">{{ success }}</div>
+{% endif %}
+
+<form method="post" class="card card-body">
+  <div class="row g-3">
+    <div class="col-12 col-md-6">
+      <label class="form-label">Username</label>
+      <input class="form-control" type="text" name="username" value="{{ target.username }}" required>
+    </div>
+
+    <div class="col-12 col-md-6">
+      <label class="form-label">Email (required for non-admin)</label>
+      <input class="form-control" type="email" name="email" value="{{ target.email or '' }}" placeholder="name@example.com">
+    </div>
+
+    <div class="col-12 col-md-6">
+      <label class="form-label">Theme</label>
+      <select class="form-select" name="theme">
+        <option value="system" {% if target.theme=='system' %}selected{% endif %}>System</option>
+        <option value="light" {% if target.theme=='light' %}selected{% endif %}>Light</option>
+        <option value="dark" {% if target.theme=='dark' %}selected{% endif %}>Dark</option>
+      </select>
+    </div>
+
+    <div class="col-12 col-md-6">
+      <label class="form-label">Purge archived tasks after (days)</label>
+      <input class="form-control" type="number" min="1" max="3650" name="purge_days" value="{{ target.purge_days }}" required>
+      <div class="form-text">Archived = completed or deleted tasks.</div>
+    </div>
+
+    <div class="col-12 col-md-6">
+      <label class="form-label">New password</label>
+      <input class="form-control" type="password" name="new_password" autocomplete="new-password">
+      <div class="form-text">Leave blank to keep the current password.</div>
+    </div>
+
+    <div class="col-12 col-md-6">
+      <label class="form-label">Role</label>
+      <div class="form-check mt-2">
+        <input class="form-check-input" type="checkbox" name="is_admin" value="true" id="is_admin" {% if target.is_admin %}checked{% endif %}>
+        <label class="form-check-label" for="is_admin">Admin</label>
+      </div>
+      {% if current_user and current_user.id == target.id %}
+        <div class="form-text">You cannot remove admin from the currently authenticated user.</div>
+      {% endif %}
+    </div>
+
+    <div class="col-12 d-flex gap-2">
+      <button class="btn btn-primary" type="submit">Save</button>
+      <a class="btn btn-outline-secondary" href="/admin/users">Cancel</a>
+    </div>
+  </div>
+</form>
+{% endblock %}
