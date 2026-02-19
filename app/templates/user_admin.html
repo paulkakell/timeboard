@@ -63,6 +63,7 @@
                   <td class="small">{{ u.email or '' }}</td>
                   <td>{% if u.is_admin %}Admin{% else %}User{% endif %}</td>
                   <td class="text-end">
+                    <a class="btn btn-sm btn-outline-secondary" href="/admin/users/{{ u.id }}/edit">Edit</a>
                     {% if u.id != current_user.id %}
                       <form method="post" action="/admin/users/{{ u.id }}/toggle-admin" class="d-inline">
                         {% if u.is_admin %}
