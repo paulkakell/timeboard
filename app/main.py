@@ -13,7 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .config import get_settings
 from .crud import create_user, purge_archived_tasks
-from .db_admin import backup_database_json
+from .db_admin import backup_database_json, get_auto_backup_settings, purge_backup_files
 from .db import Base, SessionLocal, engine
 from .emailer import build_overdue_reminder_email, email_enabled, send_email
 from .migrations import ensure_db_schema
@@ -47,6 +47,140 @@ app.include_router(ui.router)
 
 
 scheduler: BackgroundScheduler | None = None
+
+
+def _configure_auto_backup_jobs(app: FastAPI, sched: BackgroundScheduler) -> None:
+    """(Re)configure automated backup + retention jobs.
+
+    Settings are stored in the database (app_meta) so they can be changed from
+    the UI without editing settings.yml.
+    """
+
+    # Read config from DB.
+    dbj = SessionLocal()
+    try:
+        cfg = get_auto_backup_settings(dbj)
+    finally:
+        dbj.close()
+
+    freq = str(cfg.get("frequency") or "daily").strip().lower()
+    retention_days = int(cfg.get("retention_days") or 0)
+
+    # Remove existing jobs first.
+    for job_id in ("auto_backup", "backup_retention"):
+        try:
+            sched.remove_job(job_id)
+        except Exception:
+            pass
+
+    def _auto_backup_job() -> None:
+        dbx = SessionLocal()
+        try:
+            # Label backups by frequency for easier inspection.
+            label = freq.upper() if freq and freq != "disabled" else "BACKUP"
+            path = backup_database_json(dbx, prefix=label)
+            logger.info("Auto backup written: %s", path)
+        except Exception:
+            logger.exception("Error while creating automated backup")
+        finally:
+            dbx.close()
+
+        # Opportunistic retention purge right after backup creation.
+        if retention_days and retention_days > 0:
+            try:
+                deleted = purge_backup_files(retention_days=retention_days)
+                if deleted:
+                    logger.info("Purged %s old backup file(s)", deleted)
+            except Exception:
+                logger.exception("Error while purging old backups")
+
+    def _backup_retention_job() -> None:
+        # Read retention_days at runtime so changes apply without restart.
+        dbx = SessionLocal()
+        try:
+            cfgx = get_auto_backup_settings(dbx)
+            rd = int(cfgx.get("retention_days") or 0)
+        except Exception:
+            rd = 0
+        finally:
+            dbx.close()
+
+        if rd <= 0:
+            return
+
+        try:
+            deleted = purge_backup_files(retention_days=rd)
+            if deleted:
+                logger.info("Purged %s old backup file(s)", deleted)
+        except Exception:
+            logger.exception("Error while purging old backups")
+
+    # Schedule backup job (cron-based) if enabled.
+    if freq == "disabled":
+        logger.info("Auto backups disabled")
+    else:
+        tz = settings.app.timezone
+        if freq == "hourly":
+            sched.add_job(_auto_backup_job, "cron", minute=0, timezone=tz, id="auto_backup", replace_existing=True)
+        elif freq == "6h":
+            sched.add_job(
+                _auto_backup_job,
+                "cron",
+                hour="*/6",
+                minute=0,
+                timezone=tz,
+                id="auto_backup",
+                replace_existing=True,
+            )
+        elif freq == "12h":
+            sched.add_job(
+                _auto_backup_job,
+                "cron",
+                hour="*/12",
+                minute=0,
+                timezone=tz,
+                id="auto_backup",
+                replace_existing=True,
+            )
+        elif freq == "weekly":
+            sched.add_job(
+                _auto_backup_job,
+                "cron",
+                day_of_week="mon",
+                hour=0,
+                minute=0,
+                timezone=tz,
+                id="auto_backup",
+                replace_existing=True,
+            )
+        else:
+            # Default: daily at midnight in app timezone.
+            sched.add_job(
+                _auto_backup_job,
+                "cron",
+                hour=0,
+                minute=0,
+                timezone=tz,
+                id="auto_backup",
+                replace_existing=True,
+            )
+
+        logger.info("Auto backup schedule configured: %s", freq)
+
+    # Schedule retention purge job daily at 00:30 in app timezone.
+    # (It will no-op when retention_days == 0.)
+    sched.add_job(
+        _backup_retention_job,
+        "cron",
+        hour=0,
+        minute=30,
+        timezone=settings.app.timezone,
+        id="backup_retention",
+        replace_existing=True,
+    )
+
+    # Expose current config on app.state for UI rendering/debugging.
+    app.state.auto_backup_config = {"frequency": freq, "retention_days": retention_days}
 
 
 def _public_base_url() -> str:
@@ -170,28 +304,16 @@ def on_startup() -> None:
         replace_existing=True,
     )
 
+    # Automated backups (configurable via Admin → Database).
+    # Defaults preserve legacy behavior (daily at midnight; no retention purge).
+    try:
+        _configure_auto_backup_jobs(app, scheduler)
+    except Exception:
+        logger.exception("Failed to configure automated backup jobs")
 
-
-    def _daily_backup_job() -> None:
-        dbj = SessionLocal()
-        try:
-            path = backup_database_json(dbj, prefix="DAILY")
-            logger.info("Daily backup written: %s", path)
-        except Exception:
-            logger.exception("Error while creating daily backup")
-        finally:
-            dbj.close()
-
-    # Daily JSON backup at 12:00am in the configured app timezone.
-    scheduler.add_job(
-        _daily_backup_job,
-        "cron",
-        hour=0,
-        minute=0,
-        timezone=settings.app.timezone,
-        id="daily_backup",
-        replace_existing=True,
-    )
+    # Make scheduler + configure hook accessible from request handlers.
+    app.state.scheduler = scheduler
+    app.state.configure_auto_backup_jobs = lambda: _configure_auto_backup_jobs(app, scheduler)
     scheduler.start()
 
 

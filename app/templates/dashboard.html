@@ -3,6 +3,7 @@
 <h1 class="h4 mb-3">Dashboard</h1>
 
 <form class="row g-2 align-items-end mb-3" method="get" action="/dashboard">
+  <input type="hidden" name="page" value="1">
   <div class="col-12 col-md-3">
     <label class="form-label">Filter by Tag</label>
     <input class="form-control" type="text" name="tag" value="{{ tag_filter or '' }}" placeholder="e.g. finance">
@@ -42,6 +43,15 @@
     </select>
   </div>
 
+  <div class="col-12 col-md-2">
+    <label class="form-label">Per Page</label>
+    <select class="form-select" name="page_size">
+      {% for opt in page_size_options %}
+        <option value="{{ opt }}" {% if page_size == opt %}selected{% endif %}>{{ opt }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
   <div class="col-12 col-md-1 d-grid">
     <button class="btn btn-primary" type="submit">Apply</button>
   </div>
@@ -55,6 +65,7 @@
 {% if tasks|length == 0 %}
   <div class="alert alert-info">No tasks found.</div>
 {% else %}
+  <div class="small text-muted mb-2">Showing {{ page_start }}–{{ page_end }} of {{ total_count }} tasks.</div>
   <div class="table-responsive">
     <table class="table table-hover align-middle">
       <thead>
@@ -105,5 +116,29 @@
       </tbody>
     </table>
   </div>
+
+  {% if total_pages and total_pages > 1 %}
+    <nav aria-label="Dashboard pagination" class="mt-3">
+      <ul class="pagination">
+        <li class="page-item {% if not prev_url %}disabled{% endif %}">
+          <a class="page-link" href="{{ prev_url or '#' }}">Previous</a>
+        </li>
+
+        {% for item in page_links %}
+          {% if item.ellipsis %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+          {% else %}
+            <li class="page-item {% if item.current %}active{% endif %}">
+              <a class="page-link" href="{{ item.url }}">{{ item.page }}</a>
+            </li>
+          {% endif %}
+        {% endfor %}
+
+        <li class="page-item {% if not next_url %}disabled{% endif %}">
+          <a class="page-link" href="{{ next_url or '#' }}">Next</a>
+        </li>
+      </ul>
+    </nav>
+  {% endif %}
 {% endif %}
 {% endblock %}

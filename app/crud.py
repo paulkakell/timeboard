@@ -449,19 +449,18 @@ def get_task(db: Session, *, task_id: int) -> Optional[Task]:
     )
 
 
-def list_tasks(
+def _tasks_base_query(
     db: Session,
     *,
     current_user: User,
-    include_archived: bool = False,
-    tag: Optional[str] = None,
-    user_id: Optional[int] = None,
-    task_type: Optional[str] = None,
-    status: Optional[str] = None,
-    sort: str = "due_date",
-) -> list[Task]:
-    # Base query
-    q = db.query(Task).options(joinedload(Task.tags), joinedload(Task.user))
+    include_archived: bool,
+    tag: Optional[str],
+    user_id: Optional[int],
+    task_type: Optional[str],
+    status: Optional[str],
+):
+    """Build a filtered Task query without ordering/limit/offset."""
+    q = db.query(Task)
 
     # Permissions and user scoping
     if current_user.is_admin:
@@ -491,6 +490,61 @@ def list_tasks(
         tnorm = _normalize_tag_name(tag)
         q = q.join(Task.tags).filter(func.lower(Tag.name) == tnorm)
 
+    return q
+
+
+def count_tasks(
+    db: Session,
+    *,
+    current_user: User,
+    include_archived: bool = False,
+    tag: Optional[str] = None,
+    user_id: Optional[int] = None,
+    task_type: Optional[str] = None,
+    status: Optional[str] = None,
+) -> int:
+    """Count tasks matching the same filters as list_tasks()."""
+    q = _tasks_base_query(
+        db,
+        current_user=current_user,
+        include_archived=include_archived,
+        tag=tag,
+        user_id=user_id,
+        task_type=task_type,
+        status=status,
+    )
+    try:
+        n = q.with_entities(func.count(func.distinct(Task.id))).scalar()
+        return int(n or 0)
+    except Exception:
+        # Fall back to a safe, if slightly slower, count.
+        return int(len(q.all()))
+
+
+def list_tasks(
+    db: Session,
+    *,
+    current_user: User,
+    include_archived: bool = False,
+    tag: Optional[str] = None,
+    user_id: Optional[int] = None,
+    task_type: Optional[str] = None,
+    status: Optional[str] = None,
+    sort: str = "due_date",
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+) -> list[Task]:
+    # Base query
+    q = _tasks_base_query(
+        db,
+        current_user=current_user,
+        include_archived=include_archived,
+        tag=tag,
+        user_id=user_id,
+        task_type=task_type,
+        status=status,
+    ).options(joinedload(Task.tags), joinedload(Task.user))
+
     # Sorting
     desc = False
     key = (sort or "").strip()
@@ -518,6 +572,22 @@ def list_tasks(
         q = q.order_by(primary.desc(), secondary.desc())
     else:
         q = q.order_by(primary.asc(), secondary.asc())
+
+    if offset is not None:
+        try:
+            o = int(offset)
+            if o > 0:
+                q = q.offset(o)
+        except Exception:
+            pass
+
+    if limit is not None:
+        try:
+            l = int(limit)
+            if l > 0:
+                q = q.limit(l)
+        except Exception:
+            pass
 
     return q.all()
 
