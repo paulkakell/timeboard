@@ -4,4 +4,4 @@ This file is intentionally small so other modules can import the version
 without importing large dependency graphs.
 """
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.1"

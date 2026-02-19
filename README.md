@@ -2,7 +2,7 @@
 
 A lightweight, dockerized task board that supports recurrence intervals shorter than a day.
 
-Current version: **0.1.0**
+Current version: **0.1.1**
 
 Repository:
 - https://github.com/paulkakell/timeboard

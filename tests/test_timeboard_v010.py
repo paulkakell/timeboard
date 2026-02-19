@@ -110,7 +110,7 @@ def test_archived_restore_flow(settings_tmp, tmp_path):
 
     db = make_session(engine)
     try:
-        u = create_user(db, username="u2", password="password123")
+        u = create_user(db, username="u2", password="password123", email="u2@example.com")
         t = create_task(
             db,
             owner=u,
@@ -183,7 +183,7 @@ def test_list_tasks_sort_by_task_type(settings_tmp, tmp_path):
 
     db = make_session(engine)
     try:
-        u = create_user(db, username="u5", password="password123")
+        u = create_user(db, username="u5", password="password123", email="u5@example.com")
         due = datetime(2026, 1, 1, tzinfo=timezone.utc)
         create_task(db, owner=u, name="B", task_type="B", due_date=due)
         create_task(db, owner=u, name="A", task_type="A", due_date=due)

@@ -2,9 +2,29 @@
 {% block content %}
 <h1 class="h4 mb-3">Database Export / Import</h1>
 
-{% if error %}
+{% if errors %}
+  <div class="alert alert-danger" role="alert">
+    <div class="fw-bold">Import validation failed</div>
+    <ul class="mb-0">
+      {% for e in errors %}
+        <li>{{ e }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% elif error %}
   <div class="alert alert-danger" role="alert">{{ error }}</div>
 {% endif %}
+
+{% if warnings %}
+  <div class="alert alert-warning" role="alert">
+    <ul class="mb-0">
+      {% for w in warnings %}
+        <li>{{ w }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}
+
 {% if success %}
   <div class="alert alert-success" role="alert">{{ success }}</div>
 {% endif %}
