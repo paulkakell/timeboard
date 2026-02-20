@@ -194,14 +194,14 @@ def _merge_stateful_dashboard_filters(
     sort = state.get("sort") or "due_date"
 
     try:
-        ps = int(state.get("page_size") or 25)
+        ps = int(state.get("page_size") or 10)
     except Exception:
-        ps = 25
+        ps = 10
 
     # Keep page size bounded to expected values.
-    allowed_page_sizes = {25, 50, 100, 200}
+    allowed_page_sizes = {10, 25, 50, 100, 200}
     if ps not in allowed_page_sizes:
-        ps = 25
+        ps = 10
 
     selected_user_id: int | None = None
     if is_admin:
@@ -636,7 +636,7 @@ def dashboard(
     sort: str | None = None,
     reset: int | None = None,
     page: int | None = 1,
-    page_size: int | None = 25,
+    page_size: int | None = 10,
     db: Session = Depends(get_db),
 ):
     user = _get_current_user(request, db)
@@ -666,13 +666,13 @@ def dashboard(
     effective_user_id = _effective_user_filter(user, user_id)
 
     # Pagination (dashboard only)
-    allowed_page_sizes = [25, 50, 100, 200]
+    allowed_page_sizes = [10, 25, 50, 100, 200]
     try:
-        ps = int(page_size or 25)
+        ps = int(page_size or 10)
     except Exception:
-        ps = 25
+        ps = 10
     if ps not in allowed_page_sizes:
-        ps = 25
+        ps = 10
 
     try:
         pnum = int(page or 1)

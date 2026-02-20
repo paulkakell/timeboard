@@ -1,6 +1,12 @@
 # Changelog
 
 
+## 00.04.01
+
+- Additive: Dashboard page size default is now 10 (options now include 10, 25, 50, 100, 200).
+
+Compatibility: Backward compatible.
+
 ## 00.04.00
 
 - Fix: Discord webhook notifications now use an embed so the task name is a clickable link to the task entry (when an absolute URL is available via `app.base_url` or a task's `url`).

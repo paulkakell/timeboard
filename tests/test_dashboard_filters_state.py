@@ -12,11 +12,11 @@ def test_merge_stateful_dashboard_filters_defaults_admin():
     assert effective["tag"] is None
     assert effective["task_type"] is None
     assert effective["sort"] == "due_date"
-    assert effective["page_size"] == 25
+    assert effective["page_size"] == 10
     assert effective["user_id"] == 5
 
     assert new_state["sort"] == "due_date"
-    assert new_state["page_size"] == 25
+    assert new_state["page_size"] == 10
     assert new_state["user_id"] == 5
 
 
