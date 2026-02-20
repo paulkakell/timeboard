@@ -112,7 +112,7 @@ def test_discord_send_truncates_overlong_messages(monkeypatch):
     assert len(payload["content"]) <= 2000
 
 
-def test_discord_service_sends_markdown_message(settings_tmp, tmp_path, monkeypatch):
+def test_discord_service_sends_embed_with_hyperlinked_task_name(settings_tmp, tmp_path, monkeypatch):
     from app import notifications
 
     db_path = tmp_path / "discord.db"
@@ -130,10 +130,10 @@ def test_discord_service_sends_markdown_message(settings_tmp, tmp_path, monkeypa
             config={"webhook_url": "https://discord.example/webhook"},
         )
 
-        sent: list[str] = []
+        sent: list[dict] = []
 
-        def fake_send_discord(*, config, message):
-            sent.append(str(message))
+        def fake_send_discord(*, config, message=None, embeds=None):
+            sent.append({"message": message, "embeds": embeds, "config": config})
 
         monkeypatch.setattr(notifications, "_send_discord", fake_send_discord)
 
@@ -147,10 +147,22 @@ def test_discord_service_sends_markdown_message(settings_tmp, tmp_path, monkeypa
         )
 
         assert sent, "Expected a Discord notification to be sent"
-        msg = sent[0]
-        assert "**CREATED**" in msg
-        assert "<p>" not in msg
-        assert "Due:" in msg
-        assert "https://timeboard.example/tasks/" in msg
+        item = sent[0]
+        embeds = item.get("embeds") or []
+        assert embeds, "Expected an embed to be used when an absolute task URL is available"
+
+        embed0 = embeds[0]
+        assert embed0.get("title") == "Task"
+        assert str(embed0.get("url") or "").startswith("https://timeboard.example/tasks/")
+        # The embed description carries action + task_type.
+        assert "CREATED" in str(embed0.get("description") or "")
+        assert "Type" in str(embed0.get("description") or "")
+        fields = embed0.get("fields") or []
+        names = {str(f.get("name") or "") for f in fields if isinstance(f, dict)}
+        assert "Due" in names
+        assert "Tags" in names
+        # Ensure routing tag is present in the Tags field.
+        tags_field = next((f for f in fields if isinstance(f, dict) and f.get("name") == "Tags"), {})
+        assert svc.tag.name in str(tags_field.get("value") or "")
     finally:
         db.close()

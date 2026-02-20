@@ -464,20 +464,30 @@ def _send_ntfy(*, config: dict, title: str, message: str, click_url: str | None 
     _http_request(url=url, headers=headers, data=(message or "").encode("utf-8"))
 
 
-def _send_discord(*, config: dict, message: str) -> None:
+def _send_discord(*, config: dict, message: str | None, embeds: list[dict[str, Any]] | None = None) -> None:
+    """Send a Discord webhook message.
+
+    Discord accepts either `content` and/or `embeds`.
+    """
+
     # Accept a few legacy/common keys.
     webhook_url = str(config.get("webhook_url") or config.get("url") or config.get("webhook") or "").strip()
     if not webhook_url:
         raise ValueError("Discord requires webhook_url")
+
     # Discord webhook content supports Markdown but not HTML.
     content = str(message or "")
     if len(content) > 2000:
         content = content[:1997] + "..."
-    payload = {
+
+    payload: dict[str, Any] = {
         "content": content,
         # Prevent accidental @mentions from task names/tags.
         "allowed_mentions": {"parse": []},
     }
+    if embeds:
+        payload["embeds"] = embeds
+
     data = json.dumps(payload).encode("utf-8")
     _http_request(url=webhook_url, headers={"Content-Type": "application/json"}, data=data)
 
@@ -516,6 +526,74 @@ def _build_discord_markdown(*, title: str, payload: dict) -> str:
         lines.append(f"Tags: {tags_str}")
 
     return "\n".join([ln for ln in lines if ln]).strip()
+
+
+def _is_http_url(url: str) -> bool:
+    """Return True when URL is an absolute http(s) URL."""
+    try:
+        p = parse.urlparse(str(url or "").strip())
+        return p.scheme in {"http", "https"} and bool(p.netloc)
+    except Exception:
+        return False
+
+
+def _truncate(s: str, max_len: int) -> str:
+    s2 = str(s or "")
+    if max_len <= 0:
+        return ""
+    if len(s2) <= max_len:
+        return s2
+    if max_len <= 3:
+        return s2[:max_len]
+    return s2[: max_len - 3] + "..."
+
+
+def _build_discord_embeds(*, title: str, payload: dict) -> list[dict[str, Any]]:
+    """Build Discord embeds.
+
+    Primary goal: make the task name a clickable link to the task entry.
+
+    Discord only supports masked links (hyperlinked text) in embeds, not in
+    standard message content.
+    """
+
+    action = str(payload.get("change_action") or "").strip() or str(title or "Notification")
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    name = str(task.get("name") or "").strip()
+    task_type = str(task.get("task_type") or "").strip()
+    due_disp = str(payload.get("due_date_display") or "").strip()
+    url = str(payload.get("url") or payload.get("task_internal_url") or "").strip()
+
+    tags_val = payload.get("tags")
+    tags: list[str] = []
+    if isinstance(tags_val, list):
+        tags = [str(t).strip() for t in tags_val if str(t).strip()]
+    tags_str = ", ".join(tags)
+
+    # Only attach an embed URL when it is a valid absolute URL. Discord
+    # rejects invalid URLs at the API layer.
+    if not name or not _is_http_url(url):
+        return []
+
+    desc = f"**{action}**"
+    if task_type:
+        desc += f" [{task_type}]"
+
+    embed: dict[str, Any] = {
+        "title": _truncate(name, 256),
+        "url": url,
+        "description": _truncate(desc, 4096),
+    }
+
+    fields: list[dict[str, Any]] = []
+    if due_disp:
+        fields.append({"name": "Due", "value": _truncate(due_disp, 1024), "inline": True})
+    if tags_str:
+        fields.append({"name": "Tags", "value": _truncate(tags_str, 1024), "inline": False})
+    if fields:
+        embed["fields"] = fields
+
+    return [embed]
 
 
 def _send_webhook(*, config: dict, payload: dict) -> None:
@@ -697,8 +775,12 @@ def _send_notification_via_service(
             return "ok"
 
         if st == CHANNEL_DISCORD:
-            md = _build_discord_markdown(title=title, payload=payload)
-            _send_discord(config=cfg, message=md or message_text)
+            embeds = _build_discord_embeds(title=title, payload=payload)
+            if embeds:
+                _send_discord(config=cfg, message="", embeds=embeds)
+            else:
+                md = _build_discord_markdown(title=title, payload=payload)
+                _send_discord(config=cfg, message=md or message_text)
             return "ok"
 
         if st == CHANNEL_WEBHOOK:

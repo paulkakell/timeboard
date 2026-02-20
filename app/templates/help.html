@@ -46,7 +46,7 @@
 <h3>Notification routing (service tags)</h3>
 <ol>
   <li>Create one or more notification services in your profile.</li>
-  <li>Copy the generated <code>notify:…</code> tag for that service.</li>
+  <li>Copy the generated <code>notify:…</code> tag for that service (tip: click the tag in the Notifications page to copy).</li>
   <li>Add that tag to any task you want routed to that service.</li>
   <li>If a task has multiple service tags, it will send to multiple services.</li>
 </ol>
@@ -72,6 +72,7 @@
   <li><strong>Windows Push Notifications (WNS)</strong>: requires admin WNS credentials and a per-device channel URI in your service entry.</li>
   <li><strong>Gotify</strong>: posts to a Gotify server using an application token.</li>
   <li><strong>ntfy</strong>: posts to an ntfy topic (supports optional token and click-through link).</li>
+  <li><strong>Discord</strong>: posts to a Discord channel via webhook (uses an embed so the task name is clickable when an absolute URL is available).</li>
   <li><strong>Generic webhook</strong>: POSTs a JSON payload to a URL; optional secret is sent as <code>X-Timeboard-Secret</code>.</li>
   <li><strong>Generic API</strong>: calls a configurable URL/method with optional headers/token and a JSON body (for POST/PUT/PATCH).</li>
 </ul>

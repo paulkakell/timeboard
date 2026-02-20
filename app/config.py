@@ -114,6 +114,11 @@ def get_settings() -> Settings:
     if jwt_secret:
         s.security.jwt_secret = jwt_secret
 
+    # Public base URL override (useful for external notifications).
+    base_url_env = os.environ.get("TIMEBOARD_BASE_URL")
+    if base_url_env:
+        s.app.base_url = str(base_url_env).strip()
+
     # Port override is occasionally useful in container orchestration.
     port_env = os.environ.get("PORT") or os.environ.get("TIMEBOARD_PORT")
     if port_env:

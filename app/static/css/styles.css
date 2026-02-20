@@ -56,3 +56,9 @@ the cell color.
 .btn-link.btn-sm:hover {
   text-decoration: underline;
 }
+
+
+/* Click-to-copy tags (Profile → Notifications) */
+.copy-to-clipboard {
+  cursor: pointer;
+}

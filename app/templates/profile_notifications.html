@@ -23,7 +23,8 @@
             {{ svc.service_type|upper }}{% if svc.name %} — {{ svc.name }}{% endif %}
           </h2>
           <div class="text-muted small">
-            Tag: <code>{{ svc.tag.name }}</code>
+            Tag: <code class="copy-to-clipboard" data-copy-text="{{ svc.tag.name }}" data-copy-feedback="copy-feedback-{{ svc.id }}" tabindex="0" role="button" aria-label="Copy tag to clipboard" title="Click to copy">{{ svc.tag.name }}</code>
+            <span id="copy-feedback-{{ svc.id }}" class="ms-2 text-success" style="display:none;">Copied</span>
           </div>
         </div>
         <form method="post" action="/profile/notifications" onsubmit="return confirm('Delete this notification service? This will also delete its generated tag and remove it from tasks.');">

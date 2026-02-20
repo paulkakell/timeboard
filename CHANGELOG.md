@@ -1,5 +1,14 @@
 # Changelog
 
+
+## 00.04.00
+
+- Fix: Discord webhook notifications now use an embed so the task name is a clickable link to the task entry (when an absolute URL is available via `app.base_url` or a task's `url`).
+- Additive: Profile → Notifications: clicking a generated `notify:…` routing tag now copies it to the clipboard.
+- Additive: `TIMEBOARD_BASE_URL` environment variable can override `app.base_url` (useful for generating absolute links in external notifications).
+
+Compatibility: Backward compatible.
+
 ## 00.03.01
 
 - Fix: Correct broken module imports in API routers that prevented the container from starting (Portainer deployments crashed with `ModuleNotFoundError: No module named 'app.database'`).
