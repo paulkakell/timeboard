@@ -1,270 +1,297 @@
 {% extends "base.html" %}
+
 {% block content %}
-<h1 class="h4 mb-3">Help</h1>
+<h1>Help</h1>
 
-<div class="alert alert-secondary" role="alert">
-  This page describes how to use {{ app_name }}, recurrence rules, admin functions, email/password reset, and common troubleshooting.
-</div>
+<p class="text-muted">
+  Timeboard is a lightweight task tracker with tags, recurring tasks, notifications, and a complete JSON API.
+</p>
 
-<div class="accordion" id="helpAccordion">
+<hr>
 
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="hQuickStart">
-      <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#cQuickStart" aria-expanded="true" aria-controls="cQuickStart">
-        Quick start
-      </button>
-    </h2>
-    <div id="cQuickStart" class="accordion-collapse collapse show" aria-labelledby="hQuickStart" data-bs-parent="#helpAccordion">
-      <div class="accordion-body">
-        <ol class="mb-0">
-          <li>Log in with your user account. Admins can create additional users under <strong>Admin → Users</strong>.</li>
-          <li>Create a task under <strong>New Task</strong>. The due date is optional; if omitted, the creation time is used.</li>
-          <li>Use the dashboard to track <strong>Time Left</strong>. Completing a task can optionally create the next task based on recurrence settings.</li>
-          <li>Use <strong>Archived</strong> to view completed/deleted tasks and restore them back to active.</li>
-          <li>Use <strong>Profile</strong> to change theme, archived auto-purge behavior, and (optionally) set an email address.</li>
-        </ol>
-      </div>
-    </div>
-  </div>
+<h2>Core concepts</h2>
 
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="hDashboard">
-      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cDashboard" aria-expanded="false" aria-controls="cDashboard">
-        Dashboard, views, and task lifecycle
-      </button>
-    </h2>
-    <div id="cDashboard" class="accordion-collapse collapse" aria-labelledby="hDashboard" data-bs-parent="#helpAccordion">
-      <div class="accordion-body">
-        <p class="mb-2">
-          Tasks have three states: <strong>active</strong>, <strong>completed</strong>, or <strong>deleted</strong>. Completed and deleted tasks are considered <strong>archived</strong>.
-          Archived tasks are retained for a period (configured per user) and then purged by the background scheduler.
-        </p>
-        <ul class="mb-0">
-          <li><strong>Complete</strong>: marks the task completed and, if recurrence is configured, creates the next due date for the same task.</li>
-          <li><strong>Delete</strong>: soft-deletes the task (it is not immediately removed from the database).</li>
-          <li><strong>Archived</strong>: view completed/deleted tasks and restore them back to active.</li>
-          <li><strong>Task Type</strong>: dashboard supports filtering and sorting by Task Type.</li>
-          <li><strong>Admin Views</strong>: admins default to “My Tasks”. Use the <strong>Views</strong> menu for “All Tasks” or a specific user.</li>
-        </ul>
-      </div>
-    </div>
-  </div>
+<h3>Tasks</h3>
+<ul>
+  <li><strong>Name</strong>: the task title.</li>
+  <li><strong>Due date</strong>: stored in UTC and displayed using your browser's locale.</li>
+  <li><strong>Status</strong>: <code>pending</code>, <code>completed</code>, or <code>archived</code>.</li>
+  <li><strong>URL</strong> (optional): if provided, notifications link to this URL; otherwise they link to the in-app task editor.</li>
+  <li><strong>Tags</strong>: free-form labels used for organization and (optionally) notification routing.</li>
+</ul>
 
-  <div class="accordion-item" id="recurrence">
-    <h2 class="accordion-header" id="hRecurrence">
-      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cRecurrence" aria-expanded="false" aria-controls="cRecurrence">
-        Recurrence
-      </button>
-    </h2>
-    <div id="cRecurrence" class="accordion-collapse collapse" aria-labelledby="hRecurrence" data-bs-parent="#helpAccordion">
-      <div class="accordion-body">
-        <p class="mb-2">
-          Recurrence determines how the due date is updated after you complete a task.
-        </p>
+<h3>Tags</h3>
+<p>
+  Tags are global (per installation) but tasks are always scoped to a user account. Tags are used for filtering and for routing notifications.
+</p>
 
-        <h3 class="h6 mt-3">1) Post-Completion Interval</h3>
-        <p class="mb-2">
-          After you mark the task complete, the next due date is set to “completion time + interval”.
-          Use duration strings like: <code>30m</code>, <code>8h</code>, <code>1d</code>, <code>1d 2h</code>, <code>2w</code>.
-        </p>
+<hr>
 
-        <h3 class="h6 mt-3">2) Multi-Slot Daily Scheduling</h3>
-        <p class="mb-2">
-          The task recurs at specific times every day. Enter a comma-separated list of 24-hour times, for example:
-          <code>08:00, 15:00, 23:00</code>.
-          When you complete the task, the next due time is the next slot that has not yet passed (or the first slot tomorrow if all have passed).
-        </p>
+<h2>Notifications</h2>
 
-        <h3 class="h6 mt-3">3) Fixed Clock Scheduling</h3>
-        <p class="mb-2">
-          Fixed clock scheduling is anchored to the calendar or to a clock interval, regardless of when you complete it.
-        </p>
+<p>
+  Notifications are configured <strong>per user</strong> via <a href="/profile/notifications">Profile → Notifications</a>.
+  Each notification service entry creates a unique tag. If a task includes that tag, notifications are sent to that service whenever the task changes.
+</p>
 
-        <p class="mb-2"><strong>Fixed interval examples</strong> (anchored): <code>6h</code>, <code>1d</code>, <code>2w</code>.</p>
+<h3>What triggers notifications</h3>
+<ul>
+  <li><strong>created</strong>: a new task is created</li>
+  <li><strong>updated</strong>: an existing task is edited (including tags, due date, URL, etc.)</li>
+  <li><strong>past_due</strong>: the task is overdue (sent by the scheduled overdue scan)</li>
+  <li><strong>completed</strong>: the task is completed</li>
+  <li><strong>archived</strong>: the task is archived</li>
+</ul>
 
-        <p class="mb-2"><strong>Weekly rule examples</strong>:</p>
-        <ul>
-          <li><code>Every Tuesday</code></li>
-          <li><code>Mon Wed Fri</code></li>
-        </ul>
+<h3>Notification routing (service tags)</h3>
+<ol>
+  <li>Create one or more notification services in your profile.</li>
+  <li>Copy the generated <code>notify:…</code> tag for that service.</li>
+  <li>Add that tag to any task you want routed to that service.</li>
+  <li>If a task has multiple service tags, it will send to multiple services.</li>
+</ol>
 
-        <p class="mb-2"><strong>Monthly rule examples</strong>:</p>
-        <ul>
-          <li><code>10th of every month</code></li>
-          <li><code>First Monday</code></li>
-          <li><code>Last Friday</code></li>
-        </ul>
+<h3>Notification message format</h3>
+<p>
+  Notifications use this canonical text format:
+</p>
+<pre><code>&lt;CHANGE_ACTION&gt;:&lt;URL&gt;&lt;TASK_NAME&gt;&lt;/URL&gt; -&lt;DUE_DATE&gt; [&lt;TAGS&gt;]</code></pre>
+<p class="text-muted">
+  The URL is the task's configured URL if present, otherwise it links to the in-app task editor.
+</p>
 
-        <p class="mb-2"><strong>Yearly rule examples</strong>:</p>
-        <ul class="mb-0">
-          <li><code>January 5</code></li>
-          <li><code>Jan 5</code></li>
-        </ul>
+<h3>Supported notification services</h3>
 
-        <div class="alert alert-info mt-3 mb-0" role="alert">
-          Tip: if a recurrence input is rejected, it will display an error on the task form. Correct the interval or rule and save again.
-        </div>
-      </div>
-    </div>
-  </div>
+<p>
+  Each service type has a small configuration payload. You can create multiple entries per type (for example, multiple Gotify tokens or multiple webhooks).
+</p>
 
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="hTaskFields">
-      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cTaskFields" aria-expanded="false" aria-controls="cTaskFields">
-        Task fields
-      </button>
-    </h2>
-    <div id="cTaskFields" class="accordion-collapse collapse" aria-labelledby="hTaskFields" data-bs-parent="#helpAccordion">
-      <div class="accordion-body">
-        <ul class="mb-0">
-          <li><strong>Task Type</strong>: free text label used for grouping/sorting.</li>
-          <li><strong>Description</strong>: optional notes shown on the dashboard and edit view.</li>
-          <li><strong>Tags</strong>: comma-separated list. Tags are normalized and reused across tasks.</li>
-          <li><strong>Due Date</strong>: optional. If omitted, the server uses the creation time. Dates are stored internally in UTC and displayed in the configured application timezone.</li>
-        </ul>
-      </div>
-    </div>
-  </div>
+<ul>
+  <li><strong>Browser</strong>: delivered to the currently-open browser via an SSE stream. Requires browser permission.</li>
+  <li><strong>Email</strong>: sends an email per notification. Requires admin SMTP configuration.</li>
+  <li><strong>Windows Push Notifications (WNS)</strong>: requires admin WNS credentials and a per-device channel URI in your service entry.</li>
+  <li><strong>Gotify</strong>: posts to a Gotify server using an application token.</li>
+  <li><strong>ntfy</strong>: posts to an ntfy topic (supports optional token and click-through link).</li>
+  <li><strong>Generic webhook</strong>: POSTs a JSON payload to a URL; optional secret is sent as <code>X-Timeboard-Secret</code>.</li>
+  <li><strong>Generic API</strong>: calls a configurable URL/method with optional headers/token and a JSON body (for POST/PUT/PATCH).</li>
+</ul>
 
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="hEmail">
-      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cEmail" aria-expanded="false" aria-controls="cEmail">
-        Email reminders and password reset
-      </button>
-    </h2>
-    <div id="cEmail" class="accordion-collapse collapse" aria-labelledby="hEmail" data-bs-parent="#helpAccordion">
-      <div class="accordion-body">
-        <p class="mb-2">
-          If a user has an email address set in <strong>Profile</strong> and SMTP is configured in <code>settings.yml</code>, Timeboard can:
-        </p>
-        <ul>
-          <li>Send <strong>hourly</strong> reminders for overdue active tasks.</li>
-          <li>Allow password resets from the login screen via the <strong>Forgot Email?</strong> link.</li>
-          <li>Allow login with either <strong>username</strong> or <strong>email address</strong>.</li>
-        </ul>
-        <div class="alert alert-warning mb-0" role="alert">
-          If email is not configured, password reset emails and reminders will not be sent.
-        </div>
-      </div>
-    </div>
-  </div>
+<h3>Example service configuration payloads</h3>
+<p class="text-muted">
+  These match the fields shown in the profile notifications UI and the <code>/api/notifications/services</code> endpoints.
+</p>
 
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="hUsersAdmin">
-      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cUsersAdmin" aria-expanded="false" aria-controls="cUsersAdmin">
-        Users and admin functions
-      </button>
-    </h2>
-    <div id="cUsersAdmin" class="accordion-collapse collapse" aria-labelledby="hUsersAdmin" data-bs-parent="#helpAccordion">
-      <div class="accordion-body">
-        <p class="mb-2">
-          Admin users can manage users from <strong>Admin → Users</strong>.
-        </p>
-        <ul>
-          <li><strong>Create users</strong>: choose username, optional email, and password.</li>
-          <li><strong>Toggle admin</strong>: promote/demote users between Admin and User roles.</li>
-          <li><strong>Delete users</strong>: removes the user and their tasks.</li>
-          <li><strong>Database export/import</strong>: available under <strong>Admin → Database</strong> as JSON.</li>
-        </ul>
-      </div>
-    </div>
-  </div>
+<pre><code>{
+  "service_type": "gotify",
+  "name": "Phone",
+  "enabled": true,
+  "config": {
+    "base_url": "https://gotify.example.com",
+    "token": "YOUR_APP_TOKEN",
+    "priority": 5
+  }
+}</code></pre>
 
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="hMobile">
-      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cMobile" aria-expanded="false" aria-controls="cMobile">
-        Mobile view
-      </button>
-    </h2>
-    <div id="cMobile" class="accordion-collapse collapse" aria-labelledby="hMobile" data-bs-parent="#helpAccordion">
-      <div class="accordion-body">
-        <p class="mb-2">
-          Timeboard automatically serves a mobile-friendly layout when accessed from a mobile device. The footer includes a link to switch to the desktop layout.
-        </p>
-      </div>
-    </div>
-  </div>
+<pre><code>{
+  "service_type": "ntfy",
+  "name": "Personal",
+  "enabled": true,
+  "config": {
+    "server_url": "https://ntfy.sh",
+    "topic": "my-topic",
+    "token": "OPTIONAL_BEARER_TOKEN",
+    "priority": "high"
+  }
+}</code></pre>
 
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="hSettings">
-      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cSettings" aria-expanded="false" aria-controls="cSettings">
-        Configuration (settings.yml)
-      </button>
-    </h2>
-    <div id="cSettings" class="accordion-collapse collapse" aria-labelledby="hSettings" data-bs-parent="#helpAccordion">
-      <div class="accordion-body">
-        <p class="mb-2">
-          Configuration is read from <code>/data/settings.yml</code> by default (or from the path in <code>TIMEBOARD_SETTINGS</code>).
-          A sample file is included as <code>settings.sample.yml</code>.
-        </p>
+<pre><code>{
+  "service_type": "webhook",
+  "name": "Automation",
+  "enabled": true,
+  "config": {
+    "url": "https://example.com/webhook/timeboard",
+    "secret": "OPTIONAL_SHARED_SECRET"
+  }
+}</code></pre>
 
-        <dl class="row mb-0">
-          <dt class="col-sm-3">app.timezone</dt>
-          <dd class="col-sm-9">IANA timezone name used for display and local parsing (example: <code>America/Denver</code>).</dd>
+<pre><code>{
+  "service_type": "generic_api",
+  "name": "Custom API",
+  "enabled": true,
+  "config": {
+    "url": "https://api.example.com/v1/events",
+    "method": "POST",
+    "token": "OPTIONAL_BEARER_TOKEN",
+    "headers": {
+      "X-App": "timeboard"
+    }
+  }
+}</code></pre>
 
-          <dt class="col-sm-3">app.base_url</dt>
-          <dd class="col-sm-9">Public URL prefix when the app is behind a reverse proxy or served from a subpath.</dd>
+<hr>
 
-          <dt class="col-sm-3">security.session_secret</dt>
-          <dd class="col-sm-9">Secret used to sign session cookies. Change this to a strong random value.</dd>
+<h2>Admin settings</h2>
 
-          <dt class="col-sm-3">security.jwt_secret</dt>
-          <dd class="col-sm-9">Secret used for API tokens (JWT). Change this to a strong random value.</dd>
+<h3>Email (SMTP)</h3>
+<p>
+  SMTP settings are configured in <a href="/admin/email">Admin → Email</a> and stored in the database.
+  The sample <code>settings.yml</code> can be used once to seed initial values, but runtime configuration is managed in the admin UI (or via the admin API).
+</p>
 
-          <dt class="col-sm-3">database.path</dt>
-          <dd class="col-sm-9">SQLite database file path (default: <code>/data/timeboard.db</code>).</dd>
+<h3>Push notifications (WNS)</h3>
+<p>
+  Global WNS credentials are configured in <a href="/admin/notifications">Admin → Push Notifications</a>.
+  Users then add per-device <code>channel_uri</code> values in their own notification service entries.
+</p>
 
-          <dt class="col-sm-3">purge.default_days</dt>
-          <dd class="col-sm-9">Default retention for completed/deleted tasks for new users.</dd>
+<h3>Application logs</h3>
+<p>
+  Logs are written to <code>/data/logs</code> (one file per day) with standard levels: DEBUG, INFO, WARN, ERROR.
+  Retention and log level are configured in <a href="/admin/logs">Admin → Logs</a>.
+</p>
 
-          <dt class="col-sm-3">purge.interval_minutes</dt>
-          <dd class="col-sm-9">How often the purge job runs.</dd>
+<hr>
 
-          <dt class="col-sm-3">email.*</dt>
-          <dd class="col-sm-9">SMTP and reminder settings (enable password reset and overdue reminders).</dd>
-        </dl>
-      </div>
-    </div>
-  </div>
+<h2>API</h2>
 
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="hApi">
-      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cApi" aria-expanded="false" aria-controls="cApi">
-        API usage
-      </button>
-    </h2>
-    <div id="cApi" class="accordion-collapse collapse" aria-labelledby="hApi" data-bs-parent="#helpAccordion">
-      <div class="accordion-body">
-        <p class="mb-2">
-          The OpenAPI documentation is available under <strong>/docs</strong>.
-        </p>
-        <ul>
-          <li><strong>Auth</strong>: <code>/api/auth/token</code> issues a JWT.</li>
-          <li><strong>Tasks</strong>: <code>/api/tasks</code> supports filtering with <code>tag</code>, <code>task_type</code>, <code>status</code>, and sorting with <code>sort</code>. Archived tasks can be restored with <code>POST /api/tasks/{id}/restore</code>.</li>
-          <li><strong>Users</strong>: admins can update a user (email, role) with <code>PATCH /api/users/{user_id}</code>.</li>
-        </ul>
-      </div>
-    </div>
-  </div>
+<p>
+  Interactive API documentation is available at <a href="/docs">/docs</a> (OpenAPI/Swagger UI).
+</p>
 
-  <div class="accordion-item">
-    <h2 class="accordion-header" id="hTroubleshooting">
-      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cTroubleshooting" aria-expanded="false" aria-controls="cTroubleshooting">
-        Troubleshooting
-      </button>
-    </h2>
-    <div id="cTroubleshooting" class="accordion-collapse collapse" aria-labelledby="hTroubleshooting" data-bs-parent="#helpAccordion">
-      <div class="accordion-body">
-        <ul class="mb-0">
-          <li><strong>Dashboard colors do not change</strong>: force-refresh the page. Static assets are versioned, but intermediate proxies can still cache aggressively.</li>
-          <li><strong>Login loop</strong>: verify <code>security.session_secret</code> is stable across restarts and that the container clock is correct.</li>
-          <li><strong>Email not sending</strong>: confirm <code>email.enabled</code> and SMTP settings. Check container logs for SMTP errors.</li>
-          <li><strong>Timezone confusion</strong>: confirm <code>app.timezone</code> is correct and that your browser is not overriding time inputs unexpectedly.</li>
-          <li><strong>Reverse proxy paths</strong>: when serving under a subpath, set <code>app.base_url</code> accordingly.</li>
-        </ul>
-      </div>
-    </div>
-  </div>
 
-</div>
+<h3>Endpoint reference</h3>
+
+<p class="text-muted">
+  All endpoints below are rooted at the same Timeboard base URL. Most endpoints require an API token.
+</p>
+
+<h4>/api/auth</h4>
+<ul>
+  <li><code>POST /api/auth/token</code> — obtain an access token (form-encoded <code>username</code>/<code>password</code>).</li>
+</ul>
+
+<h4>/api/users</h4>
+<ul>
+  <li><code>GET /api/users/me</code> — get the current user.</li>
+  <li><code>PATCH /api/users/me</code> — update current user (name/email/password).</li>
+  <li><code>GET /api/users/</code> — list users (admin).</li>
+  <li><code>POST /api/users/</code> — create user (admin).</li>
+  <li><code>PATCH /api/users/{user_id}</code> — update user (admin).</li>
+  <li><code>DELETE /api/users/{user_id}</code> — delete user (admin).</li>
+</ul>
+
+<h4>/api/tasks</h4>
+<ul>
+  <li><code>GET /api/tasks/</code> — list tasks (supports filters like <code>status</code>, due windows, and pagination).</li>
+  <li><code>POST /api/tasks/</code> — create task.</li>
+  <li><code>GET /api/tasks/{task_id}</code> — get task.</li>
+  <li><code>PUT /api/tasks/{task_id}</code> — update task.</li>
+  <li><code>DELETE /api/tasks/{task_id}</code> — archive task.</li>
+  <li><code>POST /api/tasks/{task_id}/complete</code> — mark complete.</li>
+  <li><code>POST /api/tasks/{task_id}/restore</code> — restore from completed/archived.</li>
+</ul>
+
+<h4>/api/tags</h4>
+<ul>
+  <li><code>GET /api/tags/</code> — list tags for current user (admin can list tags for a specific user via <code>?user_id=</code>).</li>
+</ul>
+
+<h4>/api/notifications</h4>
+<ul>
+  <li><code>GET /api/notifications/services</code> — list your notification services (includes generated routing tags).</li>
+  <li><code>POST /api/notifications/services</code> — create a notification service entry (creates a routing tag).</li>
+  <li><code>GET /api/notifications/services/{service_id}</code> — get a service entry.</li>
+  <li><code>PUT /api/notifications/services/{service_id}</code> — update a service entry.</li>
+  <li><code>DELETE /api/notifications/services/{service_id}</code> — delete a service entry (also deletes its generated tag).</li>
+  <li><code>GET /api/notifications/events</code> — list notification events (filterable by <code>service_type</code>, <code>task_id</code>, <code>before_id</code>, <code>after_id</code>).</li>
+</ul>
+
+<h4>/api/admin</h4>
+<ul>
+  <li><code>GET /api/admin/email</code> — get SMTP/email settings (admin).</li>
+  <li><code>PUT /api/admin/email</code> — update SMTP/email settings (admin).</li>
+  <li><code>GET /api/admin/logging</code> — get logging settings (admin).</li>
+  <li><code>PUT /api/admin/logging</code> — update logging settings (admin).</li>
+  <li><code>GET /api/admin/wns</code> — get WNS settings (admin).</li>
+  <li><code>PUT /api/admin/wns</code> — update WNS settings (admin).</li>
+  <li><code>GET /api/admin/logs/files</code> — list log files (admin).</li>
+  <li><code>GET /api/admin/logs/files/{filename}?max_lines=...</code> — read the tail of a log file (admin).</li>
+</ul>
+
+<hr>
+<h3>Authentication</h3>
+<p>
+  Obtain a token with:
+</p>
+<pre><code>curl -X POST -d "username=YOUR_USERNAME&amp;password=YOUR_PASSWORD" \
+  http://localhost:8000/api/auth/token</code></pre>
+
+<p>
+  Use the returned token as:
+</p>
+<pre><code>Authorization: Bearer &lt;ACCESS_TOKEN&gt;</code></pre>
+
+<h3>Common API examples</h3>
+
+<p>Create a task:</p>
+<pre><code>curl -X POST http://localhost:8000/api/tasks/ \
+  -H "Authorization: Bearer &lt;TOKEN&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Pay rent",
+    "due_date_utc": "2026-03-01T00:00:00Z",
+    "tags": ["finance", "notify:u1:ntfy:abcd1234"]
+  }'</code></pre>
+
+<p>List tasks (pending):</p>
+<pre><code>curl http://localhost:8000/api/tasks/?status=pending \
+  -H "Authorization: Bearer &lt;TOKEN&gt;"</code></pre>
+
+<p>Create a notification service:</p>
+<pre><code>curl -X POST http://localhost:8000/api/notifications/services \
+  -H "Authorization: Bearer &lt;TOKEN&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "service_type": "ntfy",
+    "name": "Phone",
+    "enabled": true,
+    "config": {
+      "server_url": "https://ntfy.sh",
+      "topic": "my-topic"
+    }
+  }'</code></pre>
+
+<p>List your notification services (and copy the generated tag):</p>
+<pre><code>curl http://localhost:8000/api/notifications/services \
+  -H "Authorization: Bearer &lt;TOKEN&gt;"</code></pre>
+
+<p>List notification events:</p>
+<pre><code>curl http://localhost:8000/api/notifications/events?limit=50 \
+  -H "Authorization: Bearer &lt;TOKEN&gt;"</code></pre>
+
+<h3>Admin API examples</h3>
+<p class="text-muted">Admin endpoints require an admin user.</p>
+
+<p>Update SMTP settings:</p>
+<pre><code>curl -X PUT http://localhost:8000/api/admin/email \
+  -H "Authorization: Bearer &lt;ADMIN_TOKEN&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "smtp_host": "smtp.example.com",
+    "smtp_port": 587,
+    "smtp_username": "user@example.com",
+    "smtp_password": "YOUR_PASSWORD",
+    "smtp_from": "Timeboard &lt;timeboard@example.com&gt;",
+    "use_tls": true
+  }'</code></pre>
+
+<p>List log files:</p>
+<pre><code>curl http://localhost:8000/api/admin/logs/files \
+  -H "Authorization: Bearer &lt;ADMIN_TOKEN&gt;"</code></pre>
+
+<p>Read the tail of a log file:</p>
+<pre><code>curl "http://localhost:8000/api/admin/logs/files/timeboard-2026-02-20.log?max_lines=2000" \
+  -H "Authorization: Bearer &lt;ADMIN_TOKEN&gt;"</code></pre>
+
 {% endblock %}

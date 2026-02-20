@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block extra_head %}
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css">
+  <style>
+    #tb-calendar { min-height: 70vh; }
+    .tb-legend-swatch {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+<h1 class="h4 mb-3">Calendar</h1>
+
+<div class="mb-3 small">
+  <div class="d-flex flex-wrap gap-3">
+    <div><span class="tb-legend-swatch" style="background:#ff0000"></span><span>Past due</span></div>
+    <div><span class="tb-legend-swatch" style="background:#ffa500"></span><span>Due in 0–8h</span></div>
+    <div><span class="tb-legend-swatch" style="background:#ffff00"></span><span>Due in 8–24h</span></div>
+    <div><span class="tb-legend-swatch" style="background:#00ff00"></span><span>Due in &gt;24h</span></div>
+    <div><span class="tb-legend-swatch" style="background:#6c757d"></span><span>Completed</span></div>
+    <div><span class="tb-legend-swatch" style="background:#343a40"></span><span>Deleted</span></div>
+  </div>
+</div>
+
+<div id="tb-calendar" class="border rounded"></div>
+
+<script id="tb-events-json" type="application/json">{{ events_json | safe }}</script>
+{% endblock %}
+
+{% block extra_scripts %}
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var el = document.getElementById('tb-calendar');
+      var raw = document.getElementById('tb-events-json');
+      var events = [];
+      try {
+        events = JSON.parse(raw.textContent || '[]');
+      } catch (e) {
+        events = [];
+      }
+
+      if (!el || !window.FullCalendar) return;
+
+      function buildConfig(includeYear) {
+        var right = includeYear
+          ? 'multiMonthYear,dayGridMonth,timeGridWeek,timeGridDay'
+          : 'dayGridMonth,timeGridWeek,timeGridDay';
+
+        var views = {
+          dayGridMonth: { buttonText: 'Month' },
+          timeGridWeek: { buttonText: 'Week' },
+          timeGridDay: { buttonText: 'Day' }
+        };
+        if (includeYear) {
+          views.multiMonthYear = { buttonText: 'Year' };
+        }
+
+        return {
+          timeZone: "{{ app_timezone or 'local' }}",
+          initialView: 'dayGridMonth',
+          height: 'auto',
+          nowIndicator: true,
+          navLinks: true,
+          headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: right
+          },
+          views: views,
+          eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
+          events: events,
+          eventClick: function(info) {
+            if (info.event && info.event.url) {
+              window.location.href = info.event.url;
+              info.jsEvent.preventDefault();
+            }
+          },
+          eventDidMount: function(info) {
+            var p = info.event.extendedProps || {};
+            var tt = p.task_type ? ('[' + p.task_type + '] ') : '';
+            var st = p.status ? ('\nStatus: ' + p.status) : '';
+            var due = p.due_display ? ('\nDue: ' + p.due_display) : '';
+            var tl = p.time_left ? ('\nTime left: ' + p.time_left) : '';
+            info.el.title = tt + info.event.title + st + due + tl;
+          }
+        };
+      }
+
+      var calendar = null;
+      try {
+        calendar = new FullCalendar.Calendar(el, buildConfig(true));
+      } catch (e) {
+        // Fallback if the multi-month (year) view isn't available in the loaded bundle.
+        calendar = new FullCalendar.Calendar(el, buildConfig(false));
+      }
+
+      calendar.render();
+    });
+  </script>
+{% endblock %}

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -9,11 +9,40 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .crud import normalize_email
-from .models import AppMeta, RecurrenceType, Tag, Task, TaskStatus, TaskTag, Theme, User
+from .models import (
+    AppMeta,
+    NotificationEvent,
+    RecurrenceType,
+    Tag,
+    Task,
+    TaskStatus,
+    TaskTag,
+    Theme,
+    User,
+    UserNotificationChannel,
+    UserNotificationService,
+    UserNotificationTag,
+)
 from .version import APP_VERSION
 
 
 DEFAULT_BACKUPS_DIR = Path("/data/backups")
+
+# app_meta keys (stored in the database)
+AUTO_BACKUP_FREQUENCY_KEY = "auto_backup.frequency"
+AUTO_BACKUP_RETENTION_DAYS_KEY = "auto_backup.retention_days"
+
+# Allowed auto-backup frequencies (UI + scheduler).
+# NOTE: These are strings (stored in app_meta) so they can be extended later
+# without schema changes.
+AUTO_BACKUP_FREQUENCIES = {
+    "disabled",  # no automated backups
+    "hourly",
+    "6h",
+    "12h",
+    "daily",
+    "weekly",
+}
 
 
 def _dt(dt: datetime | None) -> str | None:
@@ -23,6 +52,44 @@ def _dt(dt: datetime | None) -> str | None:
 def _timestamp_utc(now: datetime | None = None) -> str:
     n = now or datetime.utcnow().replace(tzinfo=None)
     return n.strftime("%Y%m%dT%H%M%SZ")
+
+
+def _safe_filename_token(value: str | None, *, default: str) -> str:
+    """Return a filename-safe token.
+
+    Keeps: A-Z a-z 0-9 _ - .
+    """
+    raw = (value or "").strip()
+    token = "".join([c for c in raw if c.isalnum() or c in {"-", "_", "."}])
+    return token or default
+
+
+def build_user_export_filename(
+    *,
+    app_version: str = APP_VERSION,
+    db_version: str | None = None,
+    now: datetime | None = None,
+) -> str:
+    """Filename for a user-initiated export download."""
+    ts = _timestamp_utc(now)
+    av = _safe_filename_token(app_version, default="UNKNOWN")
+    dv = _safe_filename_token(db_version or app_version, default="UNKNOWN")
+    return f"timeboard-userexport-app{av}-db{dv}-{ts}.json"
+
+
+def build_auto_backup_filename(
+    *,
+    label: str,
+    app_version: str = APP_VERSION,
+    db_version: str | None = None,
+    now: datetime | None = None,
+) -> str:
+    """Filename for an automatic backup written under /data/backups."""
+    ts = _timestamp_utc(now)
+    lab = _safe_filename_token((label or "").upper(), default="BACKUP")
+    av = _safe_filename_token(app_version, default="UNKNOWN")
+    dv = _safe_filename_token(db_version or app_version, default="UNKNOWN")
+    return f"timeboard-autobackup-{lab}-app{av}-db{dv}-{ts}.json"
 
 
 def _parse_datetime(value: Any, *, field: str) -> datetime | None:
@@ -95,10 +162,10 @@ def export_db_json(db: Session) -> Dict[str, Any]:
                 "description": t.description,
                 "url": t.url,
                 "due_date_utc": _dt(t.due_date_utc),
-                "recurrence_type": t.recurrence_type,
+                "recurrence_type": (t.recurrence_type.value if hasattr(t.recurrence_type, "value") else t.recurrence_type),
                 "recurrence_interval_seconds": t.recurrence_interval_seconds,
                 "recurrence_times": t.recurrence_times,
-                "status": t.status,
+                "status": (t.status.value if hasattr(t.status, "value") else t.status),
                 "completed_at_utc": _dt(t.completed_at_utc),
                 "deleted_at_utc": _dt(t.deleted_at_utc),
                 "created_at": _dt(t.created_at),
@@ -112,6 +179,69 @@ def export_db_json(db: Session) -> Dict[str, Any]:
     for r in rows:
         assoc.append({"task_id": int(r[0]), "tag_id": int(r[1])})
 
+    # Optional tables added for notifications.
+    user_notification_tags: List[Dict[str, Any]] = []
+    user_notification_channels: List[Dict[str, Any]] = []
+    user_notification_services: List[Dict[str, Any]] = []
+
+    try:
+        rows = db.execute(text("SELECT user_id, tag_id, created_at FROM user_notification_tags ORDER BY user_id, tag_id")).fetchall()
+        for r in rows:
+            user_notification_tags.append(
+                {
+                    "user_id": int(r[0]),
+                    "tag_id": int(r[1]),
+                    "created_at": _dt(r[2]) if isinstance(r[2], datetime) else (str(r[2]) if r[2] is not None else None),
+                }
+            )
+    except Exception:
+        user_notification_tags = []
+
+    try:
+        rows = db.execute(
+            text(
+                "SELECT user_id, channel_type, enabled, config_json, created_at, updated_at "
+                "FROM user_notification_channels ORDER BY user_id, channel_type"
+            )
+        ).fetchall()
+        for r in rows:
+            user_notification_channels.append(
+                {
+                    "user_id": int(r[0]),
+                    "channel_type": str(r[1]),
+                    "enabled": bool(r[2]),
+                    "config_json": r[3],
+                    "created_at": _dt(r[4]) if isinstance(r[4], datetime) else (str(r[4]) if r[4] is not None else None),
+                    "updated_at": _dt(r[5]) if isinstance(r[5], datetime) else (str(r[5]) if r[5] is not None else None),
+                }
+            )
+    except Exception:
+        user_notification_channels = []
+
+    try:
+        rows = db.execute(
+            text(
+                "SELECT id, user_id, service_type, name, enabled, config_json, tag_id, created_at, updated_at "
+                "FROM user_notification_services ORDER BY user_id, id"
+            )
+        ).fetchall()
+        for r in rows:
+            user_notification_services.append(
+                {
+                    "id": int(r[0]),
+                    "user_id": int(r[1]),
+                    "service_type": str(r[2]),
+                    "name": (str(r[3]) if r[3] is not None else None),
+                    "enabled": bool(r[4]),
+                    "config_json": r[5],
+                    "tag_id": int(r[6]),
+                    "created_at": _dt(r[7]) if isinstance(r[7], datetime) else (str(r[7]) if r[7] is not None else None),
+                    "updated_at": _dt(r[8]) if isinstance(r[8], datetime) else (str(r[8]) if r[8] is not None else None),
+                }
+            )
+    except Exception:
+        user_notification_services = []
+
     return {
         "exported_at_utc": datetime.utcnow().replace(tzinfo=None).isoformat(),
         "app_version": APP_VERSION,
@@ -120,6 +250,9 @@ def export_db_json(db: Session) -> Dict[str, Any]:
         "tags": tags,
         "tasks": tasks,
         "task_tags": assoc,
+        "user_notification_tags": user_notification_tags,
+        "user_notification_channels": user_notification_channels,
+        "user_notification_services": user_notification_services,
     }
 
 
@@ -138,8 +271,12 @@ def write_backup_json(
     backups_dir.mkdir(parents=True, exist_ok=True)
 
     safe_prefix = "".join([c for c in (prefix or "").upper() if c.isalnum() or c in {"-", "_"}]) or "BACKUP"
-    ts = _timestamp_utc()
-    filename = f"timeboard-{safe_prefix}-{ts}.json"
+
+    app_version = str(data.get("app_version") or APP_VERSION)
+    db_meta = data.get("db_meta") or {}
+    db_version = str(db_meta.get("db_version") or db_meta.get("app_version") or app_version)
+
+    filename = build_auto_backup_filename(label=safe_prefix, app_version=app_version, db_version=db_version)
 
     final_path = backups_dir / filename
     tmp_path = backups_dir / f".{filename}.tmp"
@@ -148,6 +285,7 @@ def write_backup_json(
     payload = dict(data)
     payload.setdefault("backup_type", safe_prefix)
     payload.setdefault("backup_written_at_utc", datetime.utcnow().replace(tzinfo=None).isoformat())
+    payload.setdefault("backup_origin", "auto")
 
     tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     tmp_path.replace(final_path)
@@ -163,6 +301,131 @@ def backup_database_json(
     """Create a JSON backup of the current database."""
     data = export_db_json(db)
     return write_backup_json(data, prefix=prefix, backups_dir=backups_dir)
+
+
+def _get_meta_value(db: Session, key: str) -> str | None:
+    row = db.query(AppMeta).filter(AppMeta.key == str(key)).first()
+    if not row:
+        return None
+    v = str(row.value or "").strip()
+    return v or None
+
+
+def _set_meta_value(db: Session, key: str, value: str) -> None:
+    k = str(key)
+    v = str(value)
+    row = db.query(AppMeta).filter(AppMeta.key == k).first()
+    if row:
+        row.value = v
+        db.add(row)
+    else:
+        db.add(AppMeta(key=k, value=v))
+
+
+def get_auto_backup_settings(db: Session) -> dict[str, Any]:
+    """Read auto-backup settings from app_meta.
+
+    Defaults preserve previous behavior:
+    - frequency: daily
+    - retention_days: 0 (never purge)
+    """
+    freq = (_get_meta_value(db, AUTO_BACKUP_FREQUENCY_KEY) or "daily").strip().lower()
+    if freq not in AUTO_BACKUP_FREQUENCIES:
+        freq = "daily"
+
+    retention_days = 0
+    raw_rd = _get_meta_value(db, AUTO_BACKUP_RETENTION_DAYS_KEY)
+    if raw_rd is not None:
+        try:
+            retention_days = int(raw_rd)
+        except Exception:
+            retention_days = 0
+
+    if retention_days < 0:
+        retention_days = 0
+    if retention_days > 3650:
+        retention_days = 3650
+
+    return {
+        "frequency": freq,
+        "retention_days": retention_days,
+    }
+
+
+def set_auto_backup_settings(
+    db: Session,
+    *,
+    frequency: str,
+    retention_days: int,
+) -> dict[str, Any]:
+    freq = (frequency or "").strip().lower()
+    if freq not in AUTO_BACKUP_FREQUENCIES:
+        raise ValueError("Invalid backup frequency")
+
+    try:
+        rd = int(retention_days)
+    except Exception as e:
+        raise ValueError("Invalid retention_days") from e
+
+    if rd < 0 or rd > 3650:
+        raise ValueError("retention_days must be between 0 and 3650")
+
+    _set_meta_value(db, AUTO_BACKUP_FREQUENCY_KEY, freq)
+    _set_meta_value(db, AUTO_BACKUP_RETENTION_DAYS_KEY, str(rd))
+    db.commit()
+
+    return {
+        "frequency": freq,
+        "retention_days": rd,
+    }
+
+
+def purge_backup_files(
+    *,
+    retention_days: int,
+    backups_dir: Path = DEFAULT_BACKUPS_DIR,
+    now: datetime | None = None,
+) -> int:
+    """Delete backup files older than `retention_days`.
+
+    Uses file modification time (mtime) as the age source.
+    Returns the number of deleted files.
+
+    If retention_days is 0, no files are deleted.
+    """
+    try:
+        days = int(retention_days)
+    except Exception:
+        days = 0
+
+    if days <= 0:
+        return 0
+
+    cutoff = (now or datetime.utcnow().replace(tzinfo=None)) - timedelta(days=days)
+
+    if not backups_dir.exists() or not backups_dir.is_dir():
+        return 0
+
+    deleted = 0
+    for p in backups_dir.iterdir():
+        if not p.is_file():
+            continue
+        if p.name.startswith("."):
+            # Ignore temp files (including .*.tmp)
+            continue
+        if p.suffix.lower() != ".json":
+            continue
+
+        try:
+            mtime = datetime.utcfromtimestamp(p.stat().st_mtime).replace(tzinfo=None)
+            if mtime < cutoff:
+                p.unlink(missing_ok=True)
+                deleted += 1
+        except Exception:
+            # Best-effort purge; ignore files we can't stat/delete.
+            continue
+
+    return deleted
 
 
 def validate_import_payload(payload: Any) -> Tuple[List[str], List[str]]:
@@ -440,6 +703,22 @@ def import_db_json(db: Session, payload: Dict[str, Any], *, replace: bool = True
     try:
         if replace:
             # Delete in dependency order.
+            try:
+                db.execute(text("DELETE FROM notification_events"))
+            except Exception:
+                pass
+            try:
+                db.execute(text("DELETE FROM user_notification_services"))
+            except Exception:
+                pass
+            try:
+                db.execute(text("DELETE FROM user_notification_channels"))
+            except Exception:
+                pass
+            try:
+                db.execute(text("DELETE FROM user_notification_tags"))
+            except Exception:
+                pass
             db.execute(text("DELETE FROM task_tags"))
             db.execute(text("DELETE FROM tasks"))
             db.execute(text("DELETE FROM tags"))
@@ -484,6 +763,78 @@ def import_db_json(db: Session, payload: Dict[str, Any], *, replace: bool = True
                 continue
             db.add(Tag(id=int(t["id"]), name=str(t["name"]).strip()))
         db.flush()
+
+        # Optional: per-user notification service entries (multi-entry, routed by tag).
+        uns = payload.get("user_notification_services")
+        if isinstance(uns, list):
+            for r in uns:
+                try:
+                    db.execute(
+                        text(
+                            "INSERT OR REPLACE INTO user_notification_services(" 
+                            "id, user_id, service_type, name, enabled, config_json, tag_id, created_at, updated_at) "
+                            "VALUES (:id, :user_id, :service_type, :name, :enabled, :config_json, :tag_id, :created_at, :updated_at)"
+                        ),
+                        {
+                            "id": int(r.get("id")),
+                            "user_id": int(r.get("user_id")),
+                            "service_type": str(r.get("service_type")),
+                            "name": r.get("name"),
+                            "enabled": 1 if bool(r.get("enabled", True)) else 0,
+                            "config_json": r.get("config_json"),
+                            "tag_id": int(r.get("tag_id")),
+                            "created_at": r.get("created_at")
+                            or datetime.utcnow().replace(tzinfo=None).isoformat(),
+                            "updated_at": r.get("updated_at")
+                            or datetime.utcnow().replace(tzinfo=None).isoformat(),
+                        },
+                    )
+                except Exception:
+                    continue
+
+        # Optional: per-user notification subscriptions/channels (added after v00.01.02).
+        unt = payload.get("user_notification_tags")
+        if isinstance(unt, list):
+            for r in unt:
+                try:
+                    db.execute(
+                        text(
+                            "INSERT OR IGNORE INTO user_notification_tags(user_id, tag_id, created_at) "
+                            "VALUES (:user_id, :tag_id, :created_at)"
+                        ),
+                        {
+                            "user_id": int(r.get("user_id")),
+                            "tag_id": int(r.get("tag_id")),
+                            "created_at": r.get("created_at")
+                            or datetime.utcnow().replace(tzinfo=None).isoformat(),
+                        },
+                    )
+                except Exception:
+                    continue
+
+        unc = payload.get("user_notification_channels")
+        if isinstance(unc, list):
+            for r in unc:
+                try:
+                    db.execute(
+                        text(
+                            "INSERT OR REPLACE INTO user_notification_channels(" 
+                            "user_id, channel_type, enabled, config_json, created_at, updated_at) "
+                            "VALUES (:user_id, :channel_type, :enabled, :config_json, :created_at, :updated_at)"
+                        ),
+                        {
+                            "user_id": int(r.get("user_id")),
+                            "channel_type": str(r.get("channel_type")),
+                            "enabled": 1 if bool(r.get("enabled")) else 0,
+                            "config_json": r.get("config_json"),
+                            "created_at": r.get("created_at")
+                            or datetime.utcnow().replace(tzinfo=None).isoformat(),
+                            "updated_at": r.get("updated_at")
+                            or datetime.utcnow().replace(tzinfo=None).isoformat(),
+                        },
+                    )
+                except Exception:
+                    continue
 
         # Insert tasks
         for t in tasks:

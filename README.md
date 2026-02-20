@@ -2,7 +2,7 @@
 
 A lightweight, dockerized task board that supports recurrence intervals shorter than a day.
 
-Current version: **0.1.1**
+Current version: **00.03.00**
 
 Repository:
 - https://github.com/paulkakell/timeboard
@@ -23,10 +23,19 @@ Repository:
   - promote/demote users between Admin and User
   - dashboard "Views" menu (My Tasks, All Tasks, per-user views)
   - export/import database JSON
-- Optional email features (when SMTP is configured):
+- Email features (when SMTP is configured in the admin UI):
   - hourly overdue reminders
   - password reset via email ("Forgot Email?" link)
   - login using username or email address
+- Per-user notification services (each service entry generates a routing tag; tasks with that tag send notifications on create/update/past due/complete/archive):
+  - Browser notifications (SSE)
+  - Email
+  - Windows Push Notification Services (WNS)
+  - Gotify
+  - ntfy
+  - Generic webhook
+  - Generic API
+- Application logging to `/data/logs` (daily files) with configurable log level + retention via the admin UI.
 - SQLite database.
 - Full OpenAPI-documented API (Swagger UI at `/docs`).
 - Configurable via `settings.yml` on a Docker volume.
@@ -66,7 +75,7 @@ Common settings:
 - `database.path`: SQLite DB file path (default `/data/timeboard.db`).
 - `purge.default_days`: default purge window for archived tasks.
 - `purge.interval_minutes`: how often the purge job runs.
-- `email.*`: SMTP and reminder settings.
+- `email.*`: legacy seed values (copied into the database on first run if no DB settings exist). Runtime configuration is managed in the admin UI.
 
 ## API usage
 
@@ -110,6 +119,52 @@ curl -X PATCH http://localhost:8888/api/users/2 \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"is_admin": true, "email": "user@example.com"}'
+```
+
+
+Create a notification service (returns a generated routing tag):
+
+```bash
+curl -X POST http://localhost:8888/api/notifications/services \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "service_type": "ntfy",
+    "name": "Phone",
+    "enabled": true,
+    "config": { "server_url": "https://ntfy.sh", "topic": "my-topic" }
+  }'
+```
+
+List notification services:
+
+```bash
+curl http://localhost:8888/api/notifications/services \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+List notification events:
+
+```bash
+curl http://localhost:8888/api/notifications/events?limit=50 \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Admin: update SMTP settings (admin only):
+
+```bash
+curl -X PUT http://localhost:8888/api/admin/email \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "smtp_host": "smtp.example.com",
+    "smtp_port": 587,
+    "smtp_username": "user@example.com",
+    "smtp_password": "YOUR_PASSWORD",
+    "smtp_from": "Timeboard <timeboard@example.com>",
+    "use_tls": true
+  }'
 ```
 
 ## Task fields

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Admin: Logs</h1>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+<div class="card card-body mb-3">
+  <h2 class="h6">Settings</h2>
+  <form method="post" action="/admin/logs">
+    <div class="row">
+      <div class="col-md-6 mb-2">
+        <label class="form-label">Log level</label>
+        <select class="form-select" name="level">
+          {% for lvl in ['DEBUG','INFO','WARNING','ERROR'] %}
+            <option value="{{ lvl }}" {% if logging_cfg.level == lvl %}selected{% endif %}>{{ lvl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6 mb-2">
+        <label class="form-label">Retention (days)</label>
+        <input class="form-control" type="number" name="retention_days" value="{{ logging_cfg.retention_days }}">
+        <div class="form-text">Files older than this are removed automatically. Set to 0 to disable retention cleanup.</div>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+  </form>
+</div>
+
+<div class="row">
+  <div class="col-lg-4">
+    <div class="card card-body mb-3">
+      <h2 class="h6">Log files</h2>
+      {% if log_files %}
+        <ul class="list-group">
+          {% for f in log_files %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <a href="/admin/logs?file={{ f.name }}">{{ f.name }}</a>
+              <span class="text-muted">{{ (f.size_bytes // 1024) }} KB</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="text-muted">No log files found.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card card-body mb-3">
+      <h2 class="h6">View</h2>
+      {% if selected_file %}
+        <div class="mb-2"><strong>{{ selected_file }}</strong></div>
+        <pre style="max-height: 70vh; overflow: auto; white-space: pre-wrap;">{{ selected_content }}</pre>
+      {% else %}
+        <div class="text-muted">Select a log file to view.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}

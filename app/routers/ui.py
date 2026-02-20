@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import secrets
+from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -18,6 +20,7 @@ from ..config import get_settings
 from ..crud import (
     complete_task,
     consume_password_reset_token,
+    count_tasks,
     create_password_reset_token,
     create_task,
     create_user,
@@ -28,6 +31,7 @@ from ..crud import (
     get_user_by_email,
     get_user_by_username,
     list_tasks,
+    list_tags_for_user,
     list_users,
     restore_task,
     soft_delete_task,
@@ -36,9 +40,51 @@ from ..crud import (
     update_user_me,
 )
 from ..db import SessionLocal, get_db
-from ..db_admin import backup_database_json, export_db_json, import_db_json, validate_import_payload
+from ..db_admin import (
+    AUTO_BACKUP_FREQUENCIES,
+    backup_database_json,
+    build_user_export_filename,
+    export_db_json,
+    get_auto_backup_settings,
+    import_db_json,
+    set_auto_backup_settings,
+    validate_import_payload,
+)
 from ..emailer import build_password_reset_email, email_enabled, send_email
-from ..models import RecurrenceType, Task, TaskStatus, Theme, User
+from ..logging_setup import list_log_files
+from ..meta_settings import (
+    get_email_settings,
+    get_logging_settings,
+    get_wns_settings,
+    set_email_settings,
+    set_logging_settings,
+    set_wns_settings,
+)
+from ..models import (
+    NotificationEvent,
+    RecurrenceType,
+    Task,
+    TaskStatus,
+    Theme,
+    User,
+    UserNotificationChannel,
+)
+from ..notifications import (
+    CHANNEL_BROWSER,
+    CHANNEL_DISCORD,
+    CHANNEL_EMAIL,
+    CHANNEL_GENERIC_API,
+    CHANNEL_GOTIFY,
+    CHANNEL_NTFY,
+    CHANNEL_TYPES,
+    CHANNEL_WEBHOOK,
+    CHANNEL_WNS,
+    create_user_notification_service,
+    delete_user_notification_service,
+    list_user_notification_services,
+    update_user_notification_service,
+    user_has_enabled_browser_service,
+)
 from ..utils.humanize import humanize_timedelta, time_left_class, seconds_to_duration_str
 from ..utils.time_utils import iso_for_datetime_local_input, now_utc, to_local
 from ..version import APP_VERSION
@@ -121,6 +167,25 @@ def _template_context(request: Request, user: Optional[User], db: Session | None
             extra["nav_users"] = list_users(db)
         except Exception:
             extra["nav_users"] = []
+
+    # Browser notifications enabled (used by base template JS).
+    if user and "browser_notifications_enabled" not in extra and db is not None:
+        try:
+            # New service-based browser notifications.
+            enabled = user_has_enabled_browser_service(db, user_id=int(user.id))
+            if not enabled:
+                # Legacy fallback (pre-service model).
+                legacy = (
+                    db.query(UserNotificationChannel)
+                    .filter(UserNotificationChannel.user_id == int(user.id))
+                    .filter(UserNotificationChannel.channel_type == CHANNEL_BROWSER)
+                    .filter(UserNotificationChannel.enabled.is_(True))
+                    .first()
+                )
+                enabled = bool(legacy)
+            extra["browser_notifications_enabled"] = bool(enabled)
+        except Exception:
+            extra["browser_notifications_enabled"] = False
 
     return {
         "request": request,
@@ -291,7 +356,7 @@ def forgot_email_get(request: Request, db: Session = Depends(get_db)):
             db=db,
             error=None,
             success=None,
-            email_enabled=email_enabled(),
+            email_enabled=email_enabled(db),
         ),
     )
 
@@ -302,7 +367,7 @@ def forgot_email_post(
     identifier: str = Form(...),
     db: Session = Depends(get_db),
 ):
-    if not email_enabled():
+    if not email_enabled(db):
         return templates.TemplateResponse(
             "forgot_email.html",
             _template_context(
@@ -323,14 +388,15 @@ def forgot_email_post(
 
     if u and u.email:
         token = secrets.token_urlsafe(32)
-        expires = datetime.utcnow().replace(tzinfo=None) + timedelta(minutes=int(settings.email.reset_token_minutes))
+        cfg = get_email_settings(db)
+        expires = datetime.utcnow().replace(tzinfo=None) + timedelta(minutes=int(cfg.reset_token_minutes))
         create_password_reset_token(db, user=u, token=token, expires_at_utc=expires)
 
         reset_url = f"{_base_url_for_email(request)}/reset-password?token={token}"
         subject, body = build_password_reset_email(username=u.username, reset_url=reset_url)
 
         try:
-            send_email(to_address=u.email, subject=subject, body_text=body)
+            send_email(to_address=u.email, subject=subject, body_text=body, db=db)
         except Exception:
             logger.exception("Failed to send password reset email")
             # Intentionally do not reveal SMTP errors to the end-user.
@@ -436,6 +502,8 @@ def dashboard(
     user_id: int | None = None,
     task_type: str | None = None,
     sort: str | None = None,
+    page: int | None = 1,
+    page_size: int | None = 25,
     db: Session = Depends(get_db),
 ):
     user = _get_current_user(request, db)
@@ -443,6 +511,38 @@ def dashboard(
         return _redirect("/login")
 
     effective_user_id = _effective_user_filter(user, user_id)
+
+    # Pagination (dashboard only)
+    allowed_page_sizes = [25, 50, 100, 200]
+    try:
+        ps = int(page_size or 25)
+    except Exception:
+        ps = 25
+    if ps not in allowed_page_sizes:
+        ps = 25
+
+    try:
+        pnum = int(page or 1)
+    except Exception:
+        pnum = 1
+    if pnum < 1:
+        pnum = 1
+
+    total_count = count_tasks(
+        db,
+        current_user=user,
+        include_archived=False,
+        tag=tag,
+        user_id=effective_user_id,
+        task_type=task_type,
+        status=None,
+    )
+
+    total_pages = max(1, (total_count + ps - 1) // ps) if total_count else 1
+    if pnum > total_pages:
+        pnum = total_pages
+
+    offset = (pnum - 1) * ps
 
     tasks = list_tasks(
         db,
@@ -452,6 +552,8 @@ def dashboard(
         user_id=effective_user_id,
         task_type=task_type,
         sort=sort or "due_date",
+        limit=ps,
+        offset=offset,
     )
     now = now_utc()
 
@@ -482,6 +584,62 @@ def dashboard(
 
     template_name = "dashboard_mobile.html" if _site_mode(request) == "mobile" else "dashboard.html"
 
+    # Pagination URLs (preserve current filters)
+    base_params: dict[str, str] = {}
+    if tag:
+        base_params["tag"] = str(tag)
+    if task_type:
+        base_params["task_type"] = str(task_type)
+    if sort:
+        base_params["sort"] = str(sort)
+    # Always include page_size once pagination is enabled.
+    base_params["page_size"] = str(ps)
+
+    if user.is_admin:
+        # Preserve the original admin view selection.
+        if user_id is None:
+            base_params["user_id"] = str(user.id)
+        else:
+            base_params["user_id"] = str(user_id)
+
+    def _make_url(page_num: int) -> str:
+        params = dict(base_params)
+        params["page"] = str(int(page_num))
+        return f"/dashboard?{urlencode(params)}"
+
+    page_start = 0
+    page_end = 0
+    if total_count:
+        page_start = offset + 1
+        page_end = min(total_count, offset + len(tasks))
+
+    def _page_items(current: int, total: int, window: int = 2) -> list[int | None]:
+        if total <= 1:
+            return []
+        pages = {1, total}
+        for i in range(current - window, current + window + 1):
+            if 1 <= i <= total:
+                pages.add(i)
+        ordered = sorted(pages)
+        items: list[int | None] = []
+        last = 0
+        for n in ordered:
+            if last and n - last > 1:
+                items.append(None)
+            items.append(n)
+            last = n
+        return items
+
+    page_links = []
+    for item in _page_items(pnum, total_pages):
+        if item is None:
+            page_links.append({"ellipsis": True})
+        else:
+            page_links.append({"page": int(item), "url": _make_url(int(item)), "current": int(item) == pnum})
+
+    prev_url = _make_url(pnum - 1) if pnum > 1 else None
+    next_url = _make_url(pnum + 1) if pnum < total_pages else None
+
     return templates.TemplateResponse(
         template_name,
         _template_context(
@@ -495,6 +653,94 @@ def dashboard(
             task_type_filter=task_type,
             task_types=task_types,
             sort=sort or "due_date",
+            page=pnum,
+            page_size=ps,
+            page_size_options=allowed_page_sizes,
+            total_count=total_count,
+            total_pages=total_pages,
+            page_start=page_start,
+            page_end=page_end,
+            page_links=page_links,
+            prev_url=prev_url,
+            next_url=next_url,
+        ),
+    )
+
+
+@router.get("/calendar", response_class=HTMLResponse)
+def calendar_view(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+
+    # Calendar always shows tasks for the currently-logged-in user.
+    effective_user_id = int(user.id) if user.is_admin else None
+
+    tasks = list_tasks(
+        db,
+        current_user=user,
+        include_archived=True,
+        user_id=effective_user_id,
+        sort="due_date",
+    )
+
+    now = now_utc()
+    color_map = {
+        "tl-past": {"bg": "#ff0000", "text": "#ffff00"},
+        "tl-0-8": {"bg": "#ffa500", "text": "#000000"},
+        "tl-8-24": {"bg": "#ffff00", "text": "#000000"},
+        "tl-24p": {"bg": "#00ff00", "text": "#000000"},
+    }
+
+    events = []
+    for t in tasks:
+        seconds = (t.due_date_utc - now).total_seconds()
+        cls = time_left_class(seconds)
+
+        # Color coding:
+        # - Active: based on time-left buckets (consistent with dashboard).
+        # - Completed/Deleted: fixed colors.
+        if t.status == TaskStatus.completed:
+            colors = {"bg": "#6c757d", "text": "#ffffff"}
+        elif t.status == TaskStatus.deleted:
+            colors = {"bg": "#343a40", "text": "#ffffff"}
+        else:
+            colors = color_map.get(cls, {"bg": "#0d6efd", "text": "#ffffff"})
+
+        start_local = to_local(t.due_date_utc)
+        end_local = start_local + timedelta(minutes=30)
+
+        events.append(
+            {
+                "id": int(t.id),
+                "title": t.name,
+                "start": start_local.isoformat(),
+                "end": end_local.isoformat(),
+                "url": f"/tasks/{int(t.id)}/edit",
+                "backgroundColor": colors["bg"],
+                "borderColor": colors["bg"],
+                "textColor": colors["text"],
+                "extendedProps": {
+                    "task_type": t.task_type,
+                    "status": str(t.status.value if hasattr(t.status, 'value') else t.status),
+                    "due_display": start_local.strftime("%Y-%m-%d %H:%M"),
+                    "time_left": humanize_timedelta(seconds),
+                    "time_left_class": cls,
+                },
+            }
+        )
+
+    # Safer embedding into <script> blocks.
+    events_json = json.dumps(events).replace("</", "<\\/")
+
+    return templates.TemplateResponse(
+        "calendar.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            events_json=events_json,
+            app_timezone=settings.app.timezone,
         ),
     )
 
@@ -926,6 +1172,316 @@ def profile_post(
         )
 
 
+@router.get("/profile/notifications", response_class=HTMLResponse)
+def profile_notifications_get(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+
+    services = list_user_notification_services(db, user_id=int(user.id))
+    for svc in services:
+        try:
+            cfg = json.loads(svc.config_json) if svc.config_json else {}
+            if not isinstance(cfg, dict):
+                cfg = {}
+        except Exception:
+            cfg = {}
+        # attach convenience attribute for Jinja
+        setattr(svc, "cfg", cfg)
+        if svc.service_type == CHANNEL_GENERIC_API and isinstance(cfg.get("headers"), dict):
+            setattr(svc, "headers_pretty", json.dumps(cfg.get("headers"), indent=2))
+        else:
+            setattr(svc, "headers_pretty", "")
+
+    wns_admin = get_wns_settings(db)
+
+    return templates.TemplateResponse(
+        "profile_notifications.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=None,
+            success=None,
+            services=services,
+            wns_admin_enabled=bool(wns_admin.enabled),
+        ),
+    )
+
+
+@router.post("/profile/notifications", response_class=HTMLResponse)
+async def profile_notifications_post(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+
+    form = await request.form()
+    action = str(form.get("action") or "").strip().lower()
+
+    def _build_cfg(service_type: str, existing: dict | None) -> dict:
+        st = str(service_type or "").strip().lower()
+        cfg = dict(existing or {})
+
+        # Browser: no config
+        if st == CHANNEL_BROWSER:
+            return {}
+
+        if st == CHANNEL_EMAIL:
+            to_addr = str(form.get("email_to_address") or "").strip()
+            if to_addr:
+                cfg["to_address"] = to_addr
+            elif existing is None:
+                cfg.pop("to_address", None)
+            return cfg
+
+        if st == CHANNEL_GOTIFY:
+            base_url = str(form.get("gotify_base_url") or "").strip()
+            token = str(form.get("gotify_token") or "")
+            priority = str(form.get("gotify_priority") or cfg.get("priority") or "5").strip()
+            if base_url:
+                cfg["base_url"] = base_url
+            if token.strip():
+                cfg["token"] = token.strip()
+            cfg["priority"] = priority
+            return cfg
+
+        if st == CHANNEL_NTFY:
+            server_url = str(form.get("ntfy_server_url") or "").strip()
+            topic = str(form.get("ntfy_topic") or "").strip()
+            token = str(form.get("ntfy_token") or "")
+            priority = str(form.get("ntfy_priority") or cfg.get("priority") or "").strip()
+            if server_url:
+                cfg["server_url"] = server_url
+            if topic:
+                cfg["topic"] = topic
+            if token.strip():
+                cfg["token"] = token.strip()
+            if priority:
+                cfg["priority"] = priority
+            return cfg
+
+        if st == CHANNEL_DISCORD:
+            webhook_url = str(form.get("discord_webhook_url") or "")
+            if webhook_url.strip():
+                cfg["webhook_url"] = webhook_url.strip()
+            return cfg
+
+        if st == CHANNEL_WEBHOOK:
+            url = str(form.get("webhook_url") or "").strip()
+            secret = str(form.get("webhook_secret") or "")
+            if url:
+                cfg["url"] = url
+            if secret.strip():
+                cfg["secret"] = secret.strip()
+            return cfg
+
+        if st == CHANNEL_GENERIC_API:
+            url = str(form.get("generic_api_url") or "").strip()
+            method = str(form.get("generic_api_method") or cfg.get("method") or "POST").strip().upper()
+            token = str(form.get("generic_api_token") or "")
+            headers_raw = str(form.get("generic_api_headers") or "").strip()
+            if url:
+                cfg["url"] = url
+            cfg["method"] = method
+            if token.strip():
+                cfg["token"] = token.strip()
+            if headers_raw:
+                try:
+                    hdrs = json.loads(headers_raw)
+                    if isinstance(hdrs, dict):
+                        cfg["headers"] = hdrs
+                except Exception:
+                    pass
+            return cfg
+
+        if st == CHANNEL_WNS:
+            channel_uri = str(form.get("wns_channel_uri") or "")
+            if channel_uri.strip():
+                cfg["channel_uri"] = channel_uri.strip()
+            return cfg
+
+        return cfg
+
+    error: str | None = None
+    success: str | None = None
+
+    try:
+        if action == "create":
+            service_type = str(form.get("service_type") or "").strip().lower()
+            name = str(form.get("name") or "").strip() or None
+            enabled = form.get("enabled") == "on"
+            cfg = _build_cfg(service_type, None)
+            create_user_notification_service(
+                db,
+                user_id=int(user.id),
+                service_type=service_type,
+                name=name,
+                enabled=enabled,
+                config=cfg,
+            )
+            success = "Service added"
+        elif action == "update":
+            service_id = int(form.get("service_id") or "0")
+            svc = (
+                db.query(UserNotificationService)
+                .filter(UserNotificationService.id == int(service_id))
+                .filter(UserNotificationService.user_id == int(user.id))
+                .first()
+            )
+            if not svc:
+                raise ValueError("Service not found")
+            try:
+                existing_cfg = json.loads(svc.config_json) if svc.config_json else {}
+                if not isinstance(existing_cfg, dict):
+                    existing_cfg = {}
+            except Exception:
+                existing_cfg = {}
+            name = str(form.get("name") or "").strip() or None
+            enabled = form.get("enabled") == "on"
+            cfg = _build_cfg(str(svc.service_type), existing_cfg)
+            update_user_notification_service(
+                db,
+                user_id=int(user.id),
+                service_id=int(service_id),
+                name=name,
+                enabled=enabled,
+                config=cfg,
+            )
+            success = "Saved"
+        elif action == "delete":
+            service_id = int(form.get("service_id") or "0")
+            ok = delete_user_notification_service(db, user_id=int(user.id), service_id=int(service_id))
+            success = "Deleted" if ok else "Not found"
+        else:
+            raise ValueError("Unknown action")
+    except Exception as e:
+        error = str(e)
+
+    services = list_user_notification_services(db, user_id=int(user.id))
+    for svc in services:
+        try:
+            cfg = json.loads(svc.config_json) if svc.config_json else {}
+            if not isinstance(cfg, dict):
+                cfg = {}
+        except Exception:
+            cfg = {}
+        setattr(svc, "cfg", cfg)
+        if svc.service_type == CHANNEL_GENERIC_API and isinstance(cfg.get("headers"), dict):
+            setattr(svc, "headers_pretty", json.dumps(cfg.get("headers"), indent=2))
+        else:
+            setattr(svc, "headers_pretty", "")
+
+    wns_admin = get_wns_settings(db)
+
+    return templates.TemplateResponse(
+        "profile_notifications.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=error,
+            success=success,
+            services=services,
+            wns_admin_enabled=bool(wns_admin.enabled),
+        ),
+    )
+
+@router.get("/notifications/stream")
+async def notifications_stream(request: Request):
+    """Server-Sent Events stream for browser notifications.
+
+    This is intentionally session-cookie based (UI), not JWT.
+    """
+    uid = request.session.get("user_id")
+    try:
+        user_id = int(uid)
+    except Exception:
+        return JSONResponse({"error": "not_authenticated"}, status_code=401)
+
+    # Verify browser notifications are enabled for this user.
+    last_id = 0
+    db0 = SessionLocal()
+    try:
+        enabled = (
+            db0.query(UserNotificationService.id)
+            .filter(UserNotificationService.user_id == int(user_id))
+            .filter(UserNotificationService.service_type == CHANNEL_BROWSER)
+            .filter(UserNotificationService.enabled.is_(True))
+            .first()
+        )
+        if not enabled:
+            # Legacy fallback (pre-service model).
+            enabled = (
+                db0.query(UserNotificationChannel.id)
+                .filter(UserNotificationChannel.user_id == int(user_id))
+                .filter(UserNotificationChannel.channel_type == CHANNEL_BROWSER)
+                .filter(UserNotificationChannel.enabled.is_(True))
+                .first()
+            )
+        if not enabled:
+            return JSONResponse({"error": "browser_notifications_disabled"}, status_code=404)
+
+        # If the client didn't provide Last-Event-ID, start from the current max
+        # so we don't spam old notifications.
+        hdr_last = request.headers.get("last-event-id")
+        if hdr_last:
+            try:
+                last_id = int(hdr_last)
+            except Exception:
+                last_id = 0
+        else:
+            max_id = (
+                db0.query(func.max(NotificationEvent.id))
+                .filter(NotificationEvent.user_id == int(user_id))
+                .filter(NotificationEvent.service_type == CHANNEL_BROWSER)
+                .scalar()
+            )
+            last_id = int(max_id or 0)
+    finally:
+        db0.close()
+
+    async def event_generator():
+        nonlocal last_id
+        while True:
+            if await request.is_disconnected():
+                break
+
+            dbx = SessionLocal()
+            try:
+                rows = (
+                    dbx.query(NotificationEvent)
+                    .filter(NotificationEvent.user_id == int(user_id))
+                    .filter(NotificationEvent.service_type == CHANNEL_BROWSER)
+                    .filter(NotificationEvent.id > int(last_id))
+                    .order_by(NotificationEvent.id.asc())
+                    .limit(25)
+                    .all()
+                )
+
+                for ev in rows:
+                    last_id = max(int(last_id), int(ev.id))
+                    payload = {
+                        "id": int(ev.id),
+                        "event_type": ev.event_type,
+                        "title": ev.title,
+                        "message": ev.message,
+                        "task_id": ev.task_id,
+                        "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                    }
+                    data = json.dumps(payload)
+                    yield f"id: {payload['id']}\nevent: notification\ndata: {data}\n\n"
+            finally:
+                dbx.close()
+
+            await asyncio.sleep(3)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/admin/users", response_class=HTMLResponse)
 def admin_users_get(request: Request, db: Session = Depends(get_db)):
     user = _get_current_user(request, db)
@@ -1147,6 +1703,34 @@ def admin_database_get(request: Request, db: Session = Depends(get_db)):
     if not user.is_admin:
         return _redirect("/dashboard")
 
+    cfg = get_auto_backup_settings(db)
+    freq_options = [
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+        ("12h", "Every 12 hours"),
+        ("6h", "Every 6 hours"),
+        ("hourly", "Hourly"),
+        ("disabled", "Disabled"),
+    ]
+
+    # Basic backup directory stats (best-effort).
+    backup_dir = Path("/data/backups")
+    backup_count = 0
+    latest_backup = None
+    try:
+        if backup_dir.exists() and backup_dir.is_dir():
+            files = [p for p in backup_dir.glob("*.json") if p.is_file() and not p.name.startswith(".")]
+            backup_count = len(files)
+            if files:
+                newest = max(files, key=lambda p: p.stat().st_mtime)
+                latest_backup = {
+                    "name": newest.name,
+                    "mtime_utc": datetime.utcfromtimestamp(newest.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                }
+    except Exception:
+        backup_count = 0
+        latest_backup = None
+
     return templates.TemplateResponse(
         "db_admin.html",
         _template_context(
@@ -1155,6 +1739,89 @@ def admin_database_get(request: Request, db: Session = Depends(get_db)):
             db=db,
             error=None,
             success=None,
+            auto_backup_frequency=str(cfg.get("frequency") or "daily"),
+            auto_backup_retention_days=int(cfg.get("retention_days") or 0),
+            auto_backup_frequency_options=freq_options,
+            backup_dir=str(backup_dir),
+            backup_count=backup_count,
+            latest_backup=latest_backup,
+        ),
+    )
+
+
+@router.post("/admin/database/auto-backups", response_class=HTMLResponse)
+def admin_database_auto_backups_post(
+    request: Request,
+    frequency: str = Form("daily"),
+    retention_days: str = Form("0"),
+    db: Session = Depends(get_db),
+):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+    if not user.is_admin:
+        return _redirect("/dashboard")
+
+    # Apply and persist settings.
+    err = None
+    ok = None
+    try:
+        rd = int(retention_days)
+        set_auto_backup_settings(db, frequency=str(frequency), retention_days=rd)
+        ok = "Automatic backup settings saved."
+
+        # Reconfigure scheduler in-process (if available).
+        cfg_fn = getattr(request.app.state, "configure_auto_backup_jobs", None)
+        if callable(cfg_fn):
+            try:
+                cfg_fn()
+            except Exception:
+                logger.exception("Failed to reconfigure scheduler after backup settings change")
+                ok = "Automatic backup settings saved (scheduler update failed; restart may be required)."
+    except Exception as e:
+        err = str(e)
+
+    cfg = get_auto_backup_settings(db)
+    freq_options = [
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+        ("12h", "Every 12 hours"),
+        ("6h", "Every 6 hours"),
+        ("hourly", "Hourly"),
+        ("disabled", "Disabled"),
+    ]
+
+    backup_dir = Path("/data/backups")
+    backup_count = 0
+    latest_backup = None
+    try:
+        if backup_dir.exists() and backup_dir.is_dir():
+            files = [p for p in backup_dir.glob("*.json") if p.is_file() and not p.name.startswith(".")]
+            backup_count = len(files)
+            if files:
+                newest = max(files, key=lambda p: p.stat().st_mtime)
+                latest_backup = {
+                    "name": newest.name,
+                    "mtime_utc": datetime.utcfromtimestamp(newest.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                }
+    except Exception:
+        backup_count = 0
+        latest_backup = None
+
+    return templates.TemplateResponse(
+        "db_admin.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=err,
+            success=ok,
+            auto_backup_frequency=str(cfg.get("frequency") or "daily"),
+            auto_backup_retention_days=int(cfg.get("retention_days") or 0),
+            auto_backup_frequency_options=freq_options,
+            backup_dir=str(backup_dir),
+            backup_count=backup_count,
+            latest_backup=latest_backup,
         ),
     )
 
@@ -1168,9 +1835,14 @@ def admin_database_export(request: Request, db: Session = Depends(get_db)):
         return _redirect("/dashboard")
 
     data = export_db_json(db)
+
+    report = getattr(request.app.state, "db_migration_report", None)
+    db_version = getattr(report, "current_db_version", None) or APP_VERSION
+    filename = build_user_export_filename(app_version=APP_VERSION, db_version=str(db_version))
+
     return JSONResponse(
         content=data,
-        headers={"Content-Disposition": "attachment; filename=timeboard-export.json"},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 
@@ -1181,6 +1853,33 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
         return _redirect("/login")
     if not user.is_admin:
         return _redirect("/dashboard")
+
+    cfg = get_auto_backup_settings(db)
+    freq_options = [
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+        ("12h", "Every 12 hours"),
+        ("6h", "Every 6 hours"),
+        ("hourly", "Hourly"),
+        ("disabled", "Disabled"),
+    ]
+
+    backup_dir = Path("/data/backups")
+    backup_count = 0
+    latest_backup = None
+    try:
+        if backup_dir.exists() and backup_dir.is_dir():
+            files = [p for p in backup_dir.glob("*.json") if p.is_file() and not p.name.startswith(".")]
+            backup_count = len(files)
+            if files:
+                newest = max(files, key=lambda p: p.stat().st_mtime)
+                latest_backup = {
+                    "name": newest.name,
+                    "mtime_utc": datetime.utcfromtimestamp(newest.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                }
+    except Exception:
+        backup_count = 0
+        latest_backup = None
 
     # Always create a pre-import backup on any import attempt.
     backup_note: list[str] = []
@@ -1214,6 +1913,12 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
                 warnings=backup_note,
                 error=None,
                 success=None,
+                auto_backup_frequency=str(cfg.get("frequency") or "daily"),
+                auto_backup_retention_days=int(cfg.get("retention_days") or 0),
+                auto_backup_frequency_options=freq_options,
+                backup_dir=str(backup_dir),
+                backup_count=backup_count,
+                latest_backup=latest_backup,
             ),
             status_code=400,
         )
@@ -1232,6 +1937,12 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
                 warnings=warnings_all,
                 error=None,
                 success=None,
+                auto_backup_frequency=str(cfg.get("frequency") or "daily"),
+                auto_backup_retention_days=int(cfg.get("retention_days") or 0),
+                auto_backup_frequency_options=freq_options,
+                backup_dir=str(backup_dir),
+                backup_count=backup_count,
+                latest_backup=latest_backup,
             ),
             status_code=400,
         )
@@ -1254,9 +1965,23 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
                 warnings=warnings_all,
                 error=None,
                 success=None,
+                auto_backup_frequency=str(cfg.get("frequency") or "daily"),
+                auto_backup_retention_days=int(cfg.get("retention_days") or 0),
+                auto_backup_frequency_options=freq_options,
+                backup_dir=str(backup_dir),
+                backup_count=backup_count,
+                latest_backup=latest_backup,
             ),
             status_code=400,
         )
+
+    # Reconfigure scheduler jobs based on newly-imported settings.
+    cfg_fn = getattr(request.app.state, "configure_auto_backup_jobs", None)
+    if callable(cfg_fn):
+        try:
+            cfg_fn()
+        except Exception:
+            logger.exception("Failed to reconfigure scheduler after import")
 
     # Import replaces the database; clear the session to avoid user-id drift.
     try:
@@ -1265,6 +1990,308 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
         pass
 
     return _redirect("/login?success=import")
+
+
+@router.get("/admin/email", response_class=HTMLResponse)
+def admin_email_get(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    cfg = get_email_settings(db)
+    return templates.TemplateResponse(
+        "admin_email.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=None,
+            success=None,
+            email_cfg=cfg,
+        ),
+    )
+
+
+@router.post("/admin/email", response_class=HTMLResponse)
+async def admin_email_post(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    form = await request.form()
+    enabled = form.get("enabled") == "on"
+    smtp_host = str(form.get("smtp_host") or "")
+    smtp_port = int(form.get("smtp_port") or 587)
+    smtp_username = str(form.get("smtp_username") or "")
+    smtp_password = str(form.get("smtp_password") or "")
+    smtp_from = str(form.get("smtp_from") or "")
+    use_tls = form.get("use_tls") == "on"
+    reminder_interval_minutes = int(form.get("reminder_interval_minutes") or 60)
+    reset_token_minutes = int(form.get("reset_token_minutes") or 60)
+
+    clear_password = form.get("clear_smtp_password") == "on"
+    keep_existing_password = (not clear_password) and (smtp_password.strip() == "")
+    if clear_password:
+        smtp_password = ""
+
+    try:
+        cfg = set_email_settings(
+            db,
+            enabled=enabled,
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+            smtp_username=smtp_username,
+            smtp_password=smtp_password,
+            smtp_from=smtp_from,
+            use_tls=use_tls,
+            reminder_interval_minutes=reminder_interval_minutes,
+            reset_token_minutes=reset_token_minutes,
+            keep_existing_password=keep_existing_password,
+        )
+        # Reconfigure reminder jobs immediately.
+        cfg_fn = getattr(request.app.state, "configure_email_jobs", None)
+        if callable(cfg_fn):
+            try:
+                cfg_fn()
+            except Exception:
+                logger.exception("Failed to reconfigure email jobs")
+
+        return templates.TemplateResponse(
+            "admin_email.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=None,
+                success="Saved",
+                email_cfg=cfg,
+            ),
+        )
+    except Exception as e:
+        cfg = get_email_settings(db)
+        return templates.TemplateResponse(
+            "admin_email.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=str(e),
+                success=None,
+                email_cfg=cfg,
+            ),
+            status_code=400,
+        )
+
+
+@router.get("/admin/notifications", response_class=HTMLResponse)
+def admin_notifications_get(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    wns_cfg = get_wns_settings(db)
+    return templates.TemplateResponse(
+        "admin_notifications.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=None,
+            success=None,
+            wns_cfg=wns_cfg,
+        ),
+    )
+
+
+@router.post("/admin/notifications", response_class=HTMLResponse)
+async def admin_notifications_post(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    form = await request.form()
+    enabled = form.get("wns_enabled") == "on"
+    package_sid = str(form.get("wns_package_sid") or "")
+    client_secret = str(form.get("wns_client_secret") or "")
+    clear_secret = form.get("clear_wns_client_secret") == "on"
+    keep_existing_secret = (not clear_secret) and (client_secret.strip() == "")
+    if clear_secret:
+        client_secret = ""
+
+    try:
+        wns_cfg = set_wns_settings(
+            db,
+            enabled=enabled,
+            package_sid=package_sid,
+            client_secret=client_secret,
+            keep_existing_secret=keep_existing_secret,
+        )
+        return templates.TemplateResponse(
+            "admin_notifications.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=None,
+                success="Saved",
+                wns_cfg=wns_cfg,
+            ),
+        )
+    except Exception as e:
+        wns_cfg = get_wns_settings(db)
+        return templates.TemplateResponse(
+            "admin_notifications.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=str(e),
+                success=None,
+                wns_cfg=wns_cfg,
+            ),
+            status_code=400,
+        )
+
+
+def _tail_file(path: Path, max_lines: int = 2000) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        if len(lines) > max_lines:
+            lines = lines[-max_lines:]
+        return "".join(lines)
+    except Exception:
+        return ""
+
+
+@router.get("/admin/logs", response_class=HTMLResponse)
+def admin_logs_get(request: Request, file: str | None = None, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    cfg = get_logging_settings(db)
+    files = []
+    for p in list_log_files():
+        try:
+            st = p.stat()
+            files.append(
+                {
+                    "name": p.name,
+                    "size_bytes": int(st.st_size),
+                    "modified": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
+        except Exception:
+            continue
+
+    selected = None
+    content = None
+    if file:
+        safe_name = Path(file).name
+        candidate = Path("/data/logs") / safe_name
+        try:
+            if candidate.exists() and candidate.is_file() and str(candidate.resolve()).startswith(str(Path("/data/logs").resolve())):
+                selected = safe_name
+                content = _tail_file(candidate, max_lines=4000)
+        except Exception:
+            selected = None
+            content = None
+
+    return templates.TemplateResponse(
+        "admin_logs.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=None,
+            success=None,
+            logging_cfg=cfg,
+            log_files=files,
+            selected_file=selected,
+            selected_content=content,
+        ),
+    )
+
+
+@router.post("/admin/logs", response_class=HTMLResponse)
+async def admin_logs_post(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    form = await request.form()
+    level = str(form.get("level") or "INFO").strip().upper()
+    retention_days = int(form.get("retention_days") or 30)
+
+    try:
+        cfg = set_logging_settings(db, level=level, retention_days=retention_days)
+        cfg_fn = getattr(request.app.state, "configure_logging_jobs", None)
+        if callable(cfg_fn):
+            try:
+                cfg_fn()
+            except Exception:
+                logger.exception("Failed to reconfigure logging jobs")
+
+        files = []
+        for p in list_log_files():
+            try:
+                st = p.stat()
+                files.append(
+                    {
+                        "name": p.name,
+                        "size_bytes": int(st.st_size),
+                        "modified": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                )
+            except Exception:
+                continue
+
+        return templates.TemplateResponse(
+            "admin_logs.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=None,
+                success="Saved",
+                logging_cfg=cfg,
+                log_files=files,
+                selected_file=None,
+                selected_content=None,
+            ),
+        )
+    except Exception as e:
+        cfg = get_logging_settings(db)
+        files = []
+        for p in list_log_files():
+            try:
+                st = p.stat()
+                files.append(
+                    {
+                        "name": p.name,
+                        "size_bytes": int(st.st_size),
+                        "modified": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                )
+            except Exception:
+                continue
+
+        return templates.TemplateResponse(
+            "admin_logs.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=str(e),
+                success=None,
+                logging_cfg=cfg,
+                log_files=files,
+                selected_file=None,
+                selected_content=None,
+            ),
+            status_code=400,
+        )
 
 
 @router.get("/help", response_class=HTMLResponse)
