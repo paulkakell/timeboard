@@ -165,6 +165,7 @@
         <option value="wns">Windows Push (WNS)</option>
         <option value="gotify">Gotify</option>
         <option value="ntfy">ntfy</option>
+        <option value="discord">Discord</option>
         <option value="webhook">Generic webhook</option>
         <option value="generic_api">Generic API</option>
       </select>
@@ -216,6 +217,13 @@
     <input class="form-control" type="password" name="ntfy_token">
     <label class="form-label mt-2">Priority (optional)</label>
     <input class="form-control" name="ntfy_priority">
+  </div>
+
+  <div class="card card-body mb-3">
+    <h3 class="h6">Discord</h3>
+    <label class="form-label">Webhook URL</label>
+    <input class="form-control" type="password" name="discord_webhook_url" placeholder="https://discord.com/api/webhooks/...">
+    <div class="form-text">Discord webhooks support Markdown in the message content.</div>
   </div>
 
   <div class="card card-body mb-3">

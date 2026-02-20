@@ -116,6 +116,122 @@ settings = get_settings()
 logger = logging.getLogger("timeboard.ui")
 
 
+# Session key for remembering dashboard filter state.
+DASHBOARD_FILTERS_SESSION_KEY = "dashboard_filters"
+
+
+def _merge_stateful_dashboard_filters(
+    *,
+    query_params,
+    existing_state: dict | None,
+    is_admin: bool,
+    current_user_id: int,
+) -> tuple[dict, dict]:
+    """Merge dashboard filters from query params with a prior session state.
+
+    Goal: dashboard filters stay "sticky" across navigation until explicitly
+    reset.
+
+    Rules:
+      - If a filter appears in query_params, it overwrites the stored value.
+      - Missing filters fall back to stored values.
+      - Blank strings clear a filter.
+      - Page number is intentionally not stored.
+    """
+
+    state: dict = dict(existing_state or {}) if isinstance(existing_state, dict) else {}
+
+    def _has(name: str) -> bool:
+        try:
+            return name in query_params
+        except Exception:
+            return False
+
+    def _get(name: str) -> str:
+        try:
+            return str(query_params.get(name) or "")
+        except Exception:
+            return ""
+
+    def _norm_str(v: str) -> str | None:
+        s = str(v or "").strip()
+        return s if s else None
+
+    # Tag
+    if _has("tag"):
+        state["tag"] = _norm_str(_get("tag"))
+
+    # Task type
+    if _has("task_type"):
+        state["task_type"] = _norm_str(_get("task_type"))
+
+    # Sort
+    if _has("sort"):
+        # Blank sort resets to default.
+        state["sort"] = _norm_str(_get("sort"))
+
+    # Page size
+    if _has("page_size"):
+        raw = _get("page_size")
+        try:
+            state["page_size"] = int(raw)
+        except Exception:
+            # Ignore bad values; keep existing/default.
+            pass
+
+    # Admin view selector (user_id)
+    if is_admin and _has("user_id"):
+        raw = _get("user_id")
+        try:
+            state["user_id"] = int(raw)
+        except Exception:
+            # Ignore bad values; keep existing/default.
+            pass
+
+    # Defaults
+    tag = state.get("tag")
+    task_type = state.get("task_type")
+    sort = state.get("sort") or "due_date"
+
+    try:
+        ps = int(state.get("page_size") or 25)
+    except Exception:
+        ps = 25
+
+    # Keep page size bounded to expected values.
+    allowed_page_sizes = {25, 50, 100, 200}
+    if ps not in allowed_page_sizes:
+        ps = 25
+
+    selected_user_id: int | None = None
+    if is_admin:
+        try:
+            selected_user_id = int(state.get("user_id")) if state.get("user_id") is not None else None
+        except Exception:
+            selected_user_id = None
+        if selected_user_id is None:
+            selected_user_id = int(current_user_id)
+
+    # Normalize what we persist back into the session.
+    new_state = {
+        "tag": tag,
+        "task_type": task_type,
+        "sort": sort,
+        "page_size": ps,
+    }
+    if is_admin:
+        new_state["user_id"] = int(selected_user_id) if selected_user_id is not None else int(current_user_id)
+
+    effective = {
+        "tag": tag,
+        "task_type": task_type,
+        "sort": sort,
+        "page_size": ps,
+        "user_id": selected_user_id,
+    }
+    return effective, new_state
+
+
 
 def _get_current_user(request: Request, db: Session) -> Optional[User]:
     user_id = request.session.get("user_id")
@@ -161,6 +277,22 @@ def _base_url_for_email(request: Request) -> str:
 def _template_context(request: Request, user: Optional[User], db: Session | None = None, **extra) -> dict:
     report = getattr(request.app.state, "db_migration_report", None)
 
+    # Database migration notice: show the applied steps only once (after a real
+    # upgrade) so the dismissible alert in base.html doesn't reappear on every
+    # page.
+    applied_steps: list[str] = []
+    try:
+        applied_steps = list(getattr(report, "applied_steps", []) or [])
+    except Exception:
+        applied_steps = []
+
+    # Only clear the global report after an admin has had a chance to see it.
+    if user and getattr(user, "is_admin", False) and applied_steps:
+        try:
+            report.applied_steps = []
+        except Exception:
+            pass
+
     # Provide user list for admin navigation dropdowns when a DB session is available.
     if user and getattr(user, "is_admin", False) and "nav_users" not in extra and db is not None:
         try:
@@ -194,7 +326,7 @@ def _template_context(request: Request, user: Optional[User], db: Session | None
         "site_mode": _site_mode(request),
         "db_version": getattr(report, "current_db_version", None),
         "db_previous_version": getattr(report, "previous_db_version", None),
-        "db_upgrade_steps": getattr(report, "applied_steps", []),
+        "db_upgrade_steps": applied_steps,
         **extra,
     }
 
@@ -502,6 +634,7 @@ def dashboard(
     user_id: int | None = None,
     task_type: str | None = None,
     sort: str | None = None,
+    reset: int | None = None,
     page: int | None = 1,
     page_size: int | None = 25,
     db: Session = Depends(get_db),
@@ -509,6 +642,26 @@ def dashboard(
     user = _get_current_user(request, db)
     if not user:
         return _redirect("/login")
+
+    # Stateful dashboard filters: if no query params are provided, fall back to
+    # the last-used filter state stored in the session. Explicit reset clears.
+    if reset:
+        request.session.pop(DASHBOARD_FILTERS_SESSION_KEY, None)
+
+    effective_filters, new_state = _merge_stateful_dashboard_filters(
+        query_params=request.query_params,
+        existing_state=request.session.get(DASHBOARD_FILTERS_SESSION_KEY),
+        is_admin=bool(user.is_admin),
+        current_user_id=int(user.id),
+    )
+    request.session[DASHBOARD_FILTERS_SESSION_KEY] = new_state
+
+    tag = effective_filters.get("tag")
+    task_type = effective_filters.get("task_type")
+    sort = effective_filters.get("sort")
+    page_size = effective_filters.get("page_size")
+    # Admin view selector (0 = all tasks); non-admin ignores.
+    user_id = effective_filters.get("user_id") if user.is_admin else None
 
     effective_user_id = _effective_user_filter(user, user_id)
 

@@ -2,7 +2,7 @@
 
 A lightweight, dockerized task board that supports recurrence intervals shorter than a day.
 
-Current version: **00.03.00**
+Current version: **00.03.02**
 
 Repository:
 - https://github.com/paulkakell/timeboard
@@ -33,6 +33,7 @@ Repository:
   - Windows Push Notification Services (WNS)
   - Gotify
   - ntfy
+  - Discord (webhook)
   - Generic webhook
   - Generic API
 - Application logging to `/data/logs` (daily files) with configurable log level + retention via the admin UI.
@@ -187,6 +188,7 @@ Optional:
 - Deleting a task archives it as `deleted` with a timestamp and does not spawn a recurrence.
 - Completing a task archives it as `completed` with a timestamp, and spawns a new active task if recurrence is configured.
 - Admin users default to viewing only their own tasks; use the Views menu for All Tasks or a specific user.
+- Dashboard filters (tag/type/sort/page size/view) are sticky within a session until you click Reset.
 - Deleting a user permanently deletes all associated tasks.
 
 ## Development checks

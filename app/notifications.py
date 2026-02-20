@@ -186,6 +186,7 @@ def _build_task_notification(*, task: Task, event_type: str) -> tuple[str, str, 
         "message_text": message_text,
         "message_html": message_html,
         "url": link_url,
+        "due_date_display": due,
         "task": {
             "id": int(task.id) if getattr(task, "id", None) is not None else None,
             "user_id": int(task.user_id) if getattr(task, "user_id", None) is not None else None,
@@ -402,13 +403,19 @@ def _http_request(
     data: bytes | None = None,
     timeout: int = 10,
 ) -> tuple[int, str]:
+    # Only allow network calls over HTTP(S). This prevents accidental use of
+    # file:/ or other custom schemes when notification URLs are user-provided.
+    parsed = parse.urlparse(str(url))
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Invalid notification URL")
+
     hdrs = {"User-Agent": "Timeboard"}
     if headers:
         for k, v in headers.items():
             if k and v is not None:
                 hdrs[str(k)] = str(v)
     req = request.Request(url=str(url), data=data, headers=hdrs, method=str(method).upper())
-    with request.urlopen(req, timeout=timeout) as resp:
+    with request.urlopen(req, timeout=timeout) as resp:  # nosec B310
         body = resp.read() or b""
         return int(getattr(resp, "status", 200)), body.decode("utf-8", errors="replace")
 
@@ -458,12 +465,57 @@ def _send_ntfy(*, config: dict, title: str, message: str, click_url: str | None 
 
 
 def _send_discord(*, config: dict, message: str) -> None:
-    webhook_url = str(config.get("webhook_url") or "").strip()
+    # Accept a few legacy/common keys.
+    webhook_url = str(config.get("webhook_url") or config.get("url") or config.get("webhook") or "").strip()
     if not webhook_url:
         raise ValueError("Discord requires webhook_url")
-    payload = {"content": message}
+    # Discord webhook content supports Markdown but not HTML.
+    content = str(message or "")
+    if len(content) > 2000:
+        content = content[:1997] + "..."
+    payload = {
+        "content": content,
+        # Prevent accidental @mentions from task names/tags.
+        "allowed_mentions": {"parse": []},
+    }
     data = json.dumps(payload).encode("utf-8")
     _http_request(url=webhook_url, headers={"Content-Type": "application/json"}, data=data)
+
+
+def _build_discord_markdown(*, title: str, payload: dict) -> str:
+    """Build a Discord-friendly Markdown message.
+
+    Discord supports a Markdown-like syntax in message content, but not HTML.
+    """
+
+    action = str(payload.get("change_action") or "").strip() or str(title or "Notification")
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    name = str(task.get("name") or "").strip()
+    task_type = str(task.get("task_type") or "").strip()
+    due_disp = str(payload.get("due_date_display") or "").strip()
+    url = str(payload.get("url") or payload.get("task_internal_url") or "").strip()
+
+    tags_val = payload.get("tags")
+    tags: list[str] = []
+    if isinstance(tags_val, list):
+        tags = [str(t).strip() for t in tags_val if str(t).strip()]
+    tags_str = ", ".join(tags)
+
+    header = f"**{action}**"
+    if task_type:
+        header += f" [{task_type}]"
+    if name:
+        header += f" {name}"
+
+    lines: list[str] = [header.strip()]
+    if url:
+        lines.append(url)
+    if due_disp:
+        lines.append(f"Due: {due_disp}")
+    if tags_str:
+        lines.append(f"Tags: {tags_str}")
+
+    return "\n".join([ln for ln in lines if ln]).strip()
 
 
 def _send_webhook(*, config: dict, payload: dict) -> None:
@@ -645,7 +697,8 @@ def _send_notification_via_service(
             return "ok"
 
         if st == CHANNEL_DISCORD:
-            _send_discord(config=cfg, message=message_text)
+            md = _build_discord_markdown(title=title, payload=payload)
+            _send_discord(config=cfg, message=md or message_text)
             return "ok"
 
         if st == CHANNEL_WEBHOOK:
