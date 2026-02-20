@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from ..auth import require_admin_api
-from ..database import get_db
-from ..logging_config import list_log_files
+from ..db import get_db
+from ..logging_setup import list_log_files
 from ..meta_settings import (
     get_email_settings,
     get_logging_settings,

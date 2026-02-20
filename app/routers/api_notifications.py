@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user_api
-from ..database import get_db
+from ..db import get_db
 from ..models import NotificationEvent, User, UserNotificationService
 from ..notifications import (
     CHANNEL_TYPES,
