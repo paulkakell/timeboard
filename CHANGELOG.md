@@ -1,6 +1,17 @@
 # Changelog
 
 
+## 00.05.00
+
+- Additive: Asynchronous delivery for all non-browser notification services (email, gotify, ntfy, discord, webhook, generic_api, wns) so task create/update/complete no longer blocks on network calls.
+- Additive: Notification delivery status and error fields are now persisted on `notification_events` and returned by the notifications events API to aid troubleshooting.
+- Fix: Outbound notification HTTP failures now include safe URL context (query stripped) and response snippets, and async worker failures are logged with event/service/user context.
+
+Compatibility: Backward compatible (DB migration is additive).
+
+Refs: Issue N/A, Commit N/A
+
+
 ## 00.04.01
 
 - Additive: Dashboard page size default is now 10 (options now include 10, 25, 50, 100, 200).

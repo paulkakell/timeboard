@@ -26,7 +26,7 @@ from .meta_settings import (
 )
 from .migrations import ensure_db_schema
 from .models import Task, TaskStatus, User
-from .notifications import EVENT_PAST_DUE, notify_task_event
+from .notifications import EVENT_PAST_DUE, notify_task_event, shutdown_notification_dispatcher
 from .routers import api_admin, api_auth, api_notifications, api_tags, api_tasks, api_users, ui
 from .utils.time_utils import format_dt_display, to_local
 from .version import APP_VERSION
@@ -509,6 +509,9 @@ def on_shutdown() -> None:
     if scheduler:
         scheduler.shutdown(wait=False)
         scheduler = None
+
+    # Best-effort stop of background notification workers.
+    shutdown_notification_dispatcher()
 
 
 @app.get("/", include_in_schema=False)

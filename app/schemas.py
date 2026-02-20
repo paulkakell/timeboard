@@ -176,6 +176,11 @@ class NotificationEventOut(BaseModel):
     event_key: Optional[str]
     title: str
     message: Optional[str]
+    delivery_status: Optional[str] = None
+    delivery_error: Optional[str] = None
+    delivery_attempts: Optional[int] = None
+    last_attempt_at_utc: Optional[datetime] = None
+    delivered_at_utc: Optional[datetime] = None
     created_at: datetime
 
     class Config:

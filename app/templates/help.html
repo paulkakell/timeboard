@@ -34,6 +34,10 @@
   Each notification service entry creates a unique tag. If a task includes that tag, notifications are sent to that service whenever the task changes.
 </p>
 
+<p class="text-muted">
+  Non-browser notifications (email/webhooks/etc.) are dispatched asynchronously. If a send fails, the delivery status and an error summary are recorded on the notification event log (and in the application logs).
+</p>
+
 <h3>What triggers notifications</h3>
 <ul>
   <li><strong>created</strong>: a new task is created</li>

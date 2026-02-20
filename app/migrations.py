@@ -218,6 +218,25 @@ def ensure_db_schema(engine: Engine) -> MigrationReport:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_service_id ON notification_events(service_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_service_type ON notification_events(service_type)"))
 
+            # Async delivery metadata (added after v00.04.01).
+            if not _column_exists(conn, "notification_events", "delivery_status"):
+                conn.execute(text("ALTER TABLE notification_events ADD COLUMN delivery_status VARCHAR(16) NULL"))
+                applied.append("alter_table:notification_events:add_column:delivery_status")
+            if not _column_exists(conn, "notification_events", "delivery_error"):
+                conn.execute(text("ALTER TABLE notification_events ADD COLUMN delivery_error TEXT NULL"))
+                applied.append("alter_table:notification_events:add_column:delivery_error")
+            if not _column_exists(conn, "notification_events", "delivery_attempts"):
+                conn.execute(text("ALTER TABLE notification_events ADD COLUMN delivery_attempts INTEGER NULL"))
+                applied.append("alter_table:notification_events:add_column:delivery_attempts")
+            if not _column_exists(conn, "notification_events", "last_attempt_at_utc"):
+                conn.execute(text("ALTER TABLE notification_events ADD COLUMN last_attempt_at_utc DATETIME NULL"))
+                applied.append("alter_table:notification_events:add_column:last_attempt_at_utc")
+            if not _column_exists(conn, "notification_events", "delivered_at_utc"):
+                conn.execute(text("ALTER TABLE notification_events ADD COLUMN delivered_at_utc DATETIME NULL"))
+                applied.append("alter_table:notification_events:add_column:delivered_at_utc")
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_delivery_status ON notification_events(delivery_status)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_delivered_at_utc ON notification_events(delivered_at_utc)"))
+
         # Set DB version to current app version (schema and app version are aligned for now).
         _set_meta(conn, "db_version", APP_VERSION)
 

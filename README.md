@@ -2,7 +2,7 @@
 
 A lightweight, dockerized task board that supports recurrence intervals shorter than a day.
 
-Current version: **00.04.00**
+Current version: **00.05.00**
 
 Repository:
 - https://github.com/paulkakell/timeboard
@@ -36,6 +36,7 @@ Repository:
   - Discord (webhook)
   - Generic webhook
   - Generic API
+  - Non-browser deliveries are dispatched asynchronously; delivery status/errors are recorded on `notification_events` and returned by `/api/notifications/events`.
 - Application logging to `/data/logs` (daily files) with configurable log level + retention via the admin UI.
 - SQLite database.
 - Full OpenAPI-documented API (Swagger UI at `/docs`).

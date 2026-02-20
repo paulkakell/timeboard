@@ -146,6 +146,7 @@ def test_discord_service_sends_embed_with_hyperlinked_task_name(settings_tmp, tm
             tags=[svc.tag.name],
         )
 
+        assert notifications.wait_for_notification_dispatcher_idle(timeout=5.0)
         assert sent, "Expected a Discord notification to be sent"
         item = sent[0]
         embeds = item.get("embeds") or []
