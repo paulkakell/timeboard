@@ -283,7 +283,7 @@ def seed_email_settings_from_legacy_yaml(db: Session, legacy_email: Any) -> None
 LOGGING_LEVEL_KEY = "logging.level"
 LOGGING_RETENTION_DAYS_KEY = "logging.retention_days"
 
-LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+LOG_LEVELS = {"DEBUG", "INFO", "WARN", "WARNING", "ERROR", "CRITICAL"}
 
 
 @dataclass
@@ -294,6 +294,8 @@ class LoggingConfig:
 
 def get_logging_settings(db: Session) -> LoggingConfig:
     level = _get_str(db, LOGGING_LEVEL_KEY, "INFO").strip().upper()
+    if level == "WARNING":
+        level = "WARN"
     if level not in LOG_LEVELS:
         level = "INFO"
     retention = _get_int(db, LOGGING_RETENTION_DAYS_KEY, 30, min_value=0, max_value=3650)
@@ -302,6 +304,8 @@ def get_logging_settings(db: Session) -> LoggingConfig:
 
 def set_logging_settings(db: Session, *, level: str, retention_days: int) -> LoggingConfig:
     lvl = (level or "").strip().upper()
+    if lvl == "WARNING":
+        lvl = "WARN"
     if lvl not in LOG_LEVELS:
         raise ValueError("Invalid log level")
     try:

@@ -159,6 +159,30 @@ def ensure_db_schema(engine: Engine) -> MigrationReport:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_unc_user_id ON user_notification_channels(user_id)"))
             applied.append("create_table:user_notification_channels")
 
+        # User notification services (multi-entry, routed by a generated tag)
+        if not _table_exists(conn, "user_notification_services"):
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS user_notification_services ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  user_id INTEGER NOT NULL,"
+                    "  service_type VARCHAR(32) NOT NULL,"
+                    "  name VARCHAR(128) NULL,"
+                    "  enabled BOOLEAN NOT NULL DEFAULT 1,"
+                    "  config_json TEXT NULL,"
+                    "  tag_id INTEGER NOT NULL,"
+                    "  created_at DATETIME NOT NULL,"
+                    "  updated_at DATETIME NOT NULL,"
+                    "  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,"
+                    "  FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE"
+                    ")"
+                )
+            )
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_uns_tag_id ON user_notification_services(tag_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_uns_user_id ON user_notification_services(user_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_uns_service_type ON user_notification_services(service_type)"))
+            applied.append("create_table:user_notification_services")
+
         # Notification events
         if not _table_exists(conn, "notification_events"):
             conn.execute(
@@ -182,6 +206,17 @@ def ensure_db_schema(engine: Engine) -> MigrationReport:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_created_at ON notification_events(created_at)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_event_type ON notification_events(event_type)"))
             applied.append("create_table:notification_events")
+
+        # Ensure notification_events has service_id/service_type columns (added after v00.02.00).
+        if _table_exists(conn, "notification_events"):
+            if not _column_exists(conn, "notification_events", "service_id"):
+                conn.execute(text("ALTER TABLE notification_events ADD COLUMN service_id INTEGER NULL"))
+                applied.append("alter_table:notification_events:add_column:service_id")
+            if not _column_exists(conn, "notification_events", "service_type"):
+                conn.execute(text("ALTER TABLE notification_events ADD COLUMN service_type VARCHAR(32) NULL"))
+                applied.append("alter_table:notification_events:add_column:service_type")
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_service_id ON notification_events(service_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_service_type ON notification_events(service_type)"))
 
         # Set DB version to current app version (schema and app version are aligned for now).
         _set_meta(conn, "db_version", APP_VERSION)

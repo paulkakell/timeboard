@@ -150,6 +150,46 @@ class UserNotificationChannel(Base):
     )
 
 
+class UserNotificationService(Base):
+    """Per-user notification service entry.
+
+    Each service entry generates a dedicated Tag (tag_id). Any task that
+    includes that tag will send notifications for task lifecycle events to this
+    specific service entry.
+
+    This enables multiple services per user (including multiple entries of the
+    same service_type).
+    """
+
+    __tablename__ = "user_notification_services"
+    __table_args__ = (
+        UniqueConstraint("tag_id", name="uq_user_notification_services_tag_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+    # e.g. 'email', 'browser', 'gotify', 'ntfy', 'webhook', 'generic_api', 'wns'
+    service_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+
+    # User-visible label (optional).
+    name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Dedicated notification routing tag.
+    tag_id: Mapped[int] = mapped_column(Integer, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    # Optional relationship for convenience.
+    tag: Mapped["Tag"] = relationship("Tag", lazy="joined")
+
+
 class NotificationEvent(Base):
     """A record of a notification-worthy task event.
 
@@ -165,6 +205,18 @@ class NotificationEvent(Base):
     task_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True, index=True
     )
+
+    # Optional link back to the notification service entry that produced this
+    # event. (May be NULL for legacy records or if the service is deleted.)
+    service_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("user_notification_services.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Snapshot of service_type at send time for filtering without joins.
+    service_type: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+
 
     event_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     # Optional de-duplication key. Multiple NULLs are allowed.

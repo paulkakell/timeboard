@@ -2,6 +2,11 @@
 {% block content %}
 <h1>Notifications</h1>
 
+<p class="text-muted">
+  Each notification service entry generates a tag. Add that tag to any task (in the task's tag list) to route task-change notifications to that service.
+  You can create multiple services (including multiple entries of the same type).
+</p>
+
 {% if error %}
 <div class="alert alert-danger">{{ error }}</div>
 {% endif %}
@@ -9,168 +14,231 @@
 <div class="alert alert-success">{{ success }}</div>
 {% endif %}
 
-<form method="post" action="/profile/notifications">
-  <div class="row">
-    <div class="col-lg-6">
-      <div class="card card-body mb-3">
-        <h2 class="h6">Tags</h2>
-        <p class="text-muted">Notifications are triggered for tasks that have at least one of the selected tags.</p>
-
-        {% if available_tags %}
-          <div class="row">
-            {% for tag in available_tags %}
-              <div class="col-md-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="tag_ids" value="{{ tag.id }}" id="tag_{{ tag.id }}" {% if tag.id in subscribed_tag_ids %}checked{% endif %}>
-                  <label class="form-check-label" for="tag_{{ tag.id }}">{{ tag.name }}</label>
-                </div>
-              </div>
-            {% endfor %}
+{% if services %}
+  {% for svc in services %}
+    <div class="card card-body mb-3">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <h2 class="h6 mb-1">
+            {{ svc.service_type|upper }}{% if svc.name %} — {{ svc.name }}{% endif %}
+          </h2>
+          <div class="text-muted small">
+            Tag: <code>{{ svc.tag.name }}</code>
           </div>
-        {% else %}
-          <div class="text-muted">No tags yet. Create tags first, then return here to subscribe.</div>
+        </div>
+        <form method="post" action="/profile/notifications" onsubmit="return confirm('Delete this notification service? This will also delete its generated tag and remove it from tasks.');">
+          <input type="hidden" name="action" value="delete">
+          <input type="hidden" name="service_id" value="{{ svc.id }}">
+          <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+        </form>
+      </div>
+
+      <form method="post" action="/profile/notifications" class="mt-3">
+        <input type="hidden" name="action" value="update">
+        <input type="hidden" name="service_id" value="{{ svc.id }}">
+
+        <div class="row">
+          <div class="col-md-8 mb-2">
+            <label class="form-label">Name (optional)</label>
+            <input class="form-control" name="name" value="{{ svc.name or '' }}" placeholder="e.g. Phone, Work browser, Home server">
+          </div>
+          <div class="col-md-4 mb-2">
+            <label class="form-label">Enabled</label>
+            <div class="form-check form-switch mt-2">
+              <input class="form-check-input" type="checkbox" name="enabled" {% if svc.enabled %}checked{% endif %}>
+              <label class="form-check-label">Active</label>
+            </div>
+          </div>
+        </div>
+
+        {% if svc.service_type == 'browser' %}
+          <div class="form-text">
+            Browser notifications are delivered via an in-page SSE connection. Your browser may prompt for permission the next time you load a page.
+          </div>
+
+        {% elif svc.service_type == 'email' %}
+          <div class="mb-2">
+            <label class="form-label">To address (optional)</label>
+            <input class="form-control" name="email_to_address" value="{{ svc.cfg.get('to_address','') }}" placeholder="Leave blank to use your account email ({{ current_user.email or 'not set' }})">
+            <div class="form-text">Requires admin SMTP configuration.</div>
+          </div>
+
+        {% elif svc.service_type == 'gotify' %}
+          <div class="mb-2">
+            <label class="form-label">Base URL</label>
+            <input class="form-control" name="gotify_base_url" value="{{ svc.cfg.get('base_url','') }}" placeholder="https://gotify.example.com">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Token</label>
+            <input class="form-control" type="password" name="gotify_token" value="" placeholder="Leave blank to keep existing">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Priority</label>
+            <input class="form-control" name="gotify_priority" value="{{ svc.cfg.get('priority','5') }}">
+          </div>
+
+        {% elif svc.service_type == 'ntfy' %}
+          <div class="mb-2">
+            <label class="form-label">Server URL</label>
+            <input class="form-control" name="ntfy_server_url" value="{{ svc.cfg.get('server_url','https://ntfy.sh') }}">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Topic</label>
+            <input class="form-control" name="ntfy_topic" value="{{ svc.cfg.get('topic','') }}">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Token (optional)</label>
+            <input class="form-control" type="password" name="ntfy_token" value="" placeholder="Leave blank to keep existing">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Priority (optional)</label>
+            <input class="form-control" name="ntfy_priority" value="{{ svc.cfg.get('priority','') }}">
+          </div>
+
+        {% elif svc.service_type == 'discord' %}
+          <div class="mb-2">
+            <label class="form-label">Webhook URL</label>
+            <input class="form-control" type="password" name="discord_webhook_url" value="" placeholder="Leave blank to keep existing">
+          </div>
+
+        {% elif svc.service_type == 'webhook' %}
+          <div class="mb-2">
+            <label class="form-label">URL</label>
+            <input class="form-control" name="webhook_url" value="{{ svc.cfg.get('url','') }}">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Secret (optional)</label>
+            <input class="form-control" type="password" name="webhook_secret" value="" placeholder="Leave blank to keep existing">
+          </div>
+
+        {% elif svc.service_type == 'generic_api' %}
+          <div class="mb-2">
+            <label class="form-label">URL</label>
+            <input class="form-control" name="generic_api_url" value="{{ svc.cfg.get('url','') }}">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Method</label>
+            <input class="form-control" name="generic_api_method" value="{{ svc.cfg.get('method','POST') }}">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Token (optional)</label>
+            <input class="form-control" type="password" name="generic_api_token" value="" placeholder="Leave blank to keep existing">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Headers JSON (optional)</label>
+            <textarea class="form-control" name="generic_api_headers" rows="3" placeholder='{"X-Header": "value"}'>{{ svc.headers_pretty }}</textarea>
+          </div>
+
+        {% elif svc.service_type == 'wns' %}
+          {% if not wns_admin_enabled %}
+            <div class="alert alert-warning mb-2">WNS is disabled or not configured by the admin.</div>
+          {% endif %}
+          <div class="mb-2">
+            <label class="form-label">Channel URI</label>
+            <input class="form-control" name="wns_channel_uri" value="{{ svc.cfg.get('channel_uri','') }}" {% if not wns_admin_enabled %}disabled{% endif %}>
+            <div class="form-text">Paste the per-device WNS channel URI here.</div>
+          </div>
+
         {% endif %}
-      </div>
 
-      <div class="card card-body mb-3">
-        <h2 class="h6">Browser notifications</h2>
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" name="browser_enabled" id="browser_enabled" {% if channels['browser']['enabled'] %}checked{% endif %}>
-          <label class="form-check-label" for="browser_enabled">Enable browser notifications</label>
-        </div>
-        <div class="form-text">
-          Uses an in-page connection (SSE). Your browser may ask for permission the next time you load a page.
-        </div>
-      </div>
-
-      <div class="card card-body mb-3">
-        <h2 class="h6">Email</h2>
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" name="email_notifications_enabled" id="email_notifications_enabled" {% if channels['email']['enabled'] %}checked{% endif %}>
-          <label class="form-check-label" for="email_notifications_enabled">Send email notifications</label>
-        </div>
-        <div class="form-text">
-          Sent to your user email address ({{ current_user.email or 'not set' }}). Requires admin SMTP configuration.
-        </div>
-      </div>
-
-      <div class="card card-body mb-3">
-        <h2 class="h6">Windows Push Notification Services (WNS)</h2>
-        {% if not wns_admin_enabled %}
-          <div class="alert alert-warning mb-2">WNS is disabled or not configured by the admin.</div>
-        {% endif %}
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" name="wns_enabled" id="wns_enabled" {% if channels['wns']['enabled'] %}checked{% endif %} {% if not wns_admin_enabled %}disabled{% endif %}>
-          <label class="form-check-label" for="wns_enabled">Enable WNS notifications</label>
-        </div>
-        <div class="mb-2 mt-2">
-          <label class="form-label">Channel URI</label>
-          <input class="form-control" name="wns_channel_uri" value="{{ channels['wns']['config'].get('channel_uri','') }}" {% if not wns_admin_enabled %}disabled{% endif %}>
-          <div class="form-text">Paste the per-device WNS channel URI here.</div>
-        </div>
-      </div>
+        <button class="btn btn-primary mt-2" type="submit">Save</button>
+      </form>
     </div>
+  {% endfor %}
+{% else %}
+  <div class="text-muted mb-3">No notification services configured yet.</div>
+{% endif %}
 
-    <div class="col-lg-6">
-      <div class="card card-body mb-3">
-        <h2 class="h6">Gotify</h2>
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" name="gotify_enabled" id="gotify_enabled" {% if channels['gotify']['enabled'] %}checked{% endif %}>
-          <label class="form-check-label" for="gotify_enabled">Enable Gotify</label>
-        </div>
-        <div class="mb-2 mt-2">
-          <label class="form-label">Base URL</label>
-          <input class="form-control" name="gotify_base_url" value="{{ channels['gotify']['config'].get('base_url','') }}" placeholder="https://gotify.example.com">
-        </div>
-        <div class="mb-2">
-          <label class="form-label">Token</label>
-          <input class="form-control" type="password" name="gotify_token" value="" placeholder="Leave blank to keep existing">
-        </div>
-        <div class="mb-2">
-          <label class="form-label">Priority</label>
-          <input class="form-control" name="gotify_priority" value="{{ channels['gotify']['config'].get('priority','5') }}">
-        </div>
-      </div>
+<hr>
 
-      <div class="card card-body mb-3">
-        <h2 class="h6">ntfy</h2>
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" name="ntfy_enabled" id="ntfy_enabled" {% if channels['ntfy']['enabled'] %}checked{% endif %}>
-          <label class="form-check-label" for="ntfy_enabled">Enable ntfy</label>
-        </div>
-        <div class="mb-2 mt-2">
-          <label class="form-label">Server URL</label>
-          <input class="form-control" name="ntfy_server_url" value="{{ channels['ntfy']['config'].get('server_url','https://ntfy.sh') }}">
-        </div>
-        <div class="mb-2">
-          <label class="form-label">Topic</label>
-          <input class="form-control" name="ntfy_topic" value="{{ channels['ntfy']['config'].get('topic','') }}">
-        </div>
-        <div class="mb-2">
-          <label class="form-label">Token (optional)</label>
-          <input class="form-control" type="password" name="ntfy_token" value="" placeholder="Leave blank to keep existing">
-        </div>
-        <div class="mb-2">
-          <label class="form-label">Priority (optional)</label>
-          <input class="form-control" name="ntfy_priority" value="{{ channels['ntfy']['config'].get('priority','') }}">
-        </div>
-      </div>
+<h2 class="h5">Add a new notification service</h2>
 
-      <div class="card card-body mb-3">
-        <h2 class="h6">Discord</h2>
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" name="discord_enabled" id="discord_enabled" {% if channels['discord']['enabled'] %}checked{% endif %}>
-          <label class="form-check-label" for="discord_enabled">Enable Discord</label>
-        </div>
-        <div class="mb-2 mt-2">
-          <label class="form-label">Webhook URL</label>
-          <input class="form-control" type="password" name="discord_webhook_url" value="" placeholder="Leave blank to keep existing">
-        </div>
-      </div>
+<form method="post" action="/profile/notifications">
+  <input type="hidden" name="action" value="create">
 
-      <div class="card card-body mb-3">
-        <h2 class="h6">Generic webhook</h2>
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" name="webhook_enabled" id="webhook_enabled" {% if channels['webhook']['enabled'] %}checked{% endif %}>
-          <label class="form-check-label" for="webhook_enabled">Enable webhook</label>
-        </div>
-        <div class="mb-2 mt-2">
-          <label class="form-label">URL</label>
-          <input class="form-control" name="webhook_url" value="{{ channels['webhook']['config'].get('url','') }}">
-        </div>
-        <div class="mb-2">
-          <label class="form-label">Secret (optional)</label>
-          <input class="form-control" type="password" name="webhook_secret" value="" placeholder="Leave blank to keep existing">
-        </div>
-      </div>
-
-      <div class="card card-body mb-3">
-        <h2 class="h6">Generic API</h2>
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" name="generic_api_enabled" id="generic_api_enabled" {% if channels['generic_api']['enabled'] %}checked{% endif %}>
-          <label class="form-check-label" for="generic_api_enabled">Enable API call</label>
-        </div>
-        <div class="mb-2 mt-2">
-          <label class="form-label">URL</label>
-          <input class="form-control" name="generic_api_url" value="{{ channels['generic_api']['config'].get('url','') }}">
-        </div>
-        <div class="mb-2">
-          <label class="form-label">Method</label>
-          <input class="form-control" name="generic_api_method" value="{{ channels['generic_api']['config'].get('method','POST') }}">
-        </div>
-        <div class="mb-2">
-          <label class="form-label">Token (optional)</label>
-          <input class="form-control" type="password" name="generic_api_token" value="" placeholder="Leave blank to keep existing">
-        </div>
-        <div class="mb-2">
-          <label class="form-label">Headers JSON (optional)</label>
-          <textarea class="form-control" name="generic_api_headers" rows="3" placeholder='{"X-Header": "value"}'>{{ channels['generic_api']['config'].get('headers','') }}</textarea>
-        </div>
-      </div>
+  <div class="row">
+    <div class="col-md-6 mb-2">
+      <label class="form-label">Service type</label>
+      <select class="form-select" name="service_type">
+        <option value="browser">Browser</option>
+        <option value="email">Email</option>
+        <option value="wns">Windows Push (WNS)</option>
+        <option value="gotify">Gotify</option>
+        <option value="ntfy">ntfy</option>
+        <option value="webhook">Generic webhook</option>
+        <option value="generic_api">Generic API</option>
+      </select>
+      <div class="form-text">Fill in the matching settings below for the selected type; unused fields are ignored.</div>
+    </div>
+    <div class="col-md-6 mb-2">
+      <label class="form-label">Name (optional)</label>
+      <input class="form-control" name="name" placeholder="e.g. Phone, Work browser, Home server">
     </div>
   </div>
 
-  <button type="submit" class="btn btn-primary">Save</button>
+  <div class="mb-2">
+    <label class="form-label">Enabled</label>
+    <div class="form-check form-switch">
+      <input class="form-check-input" type="checkbox" name="enabled" checked>
+      <label class="form-check-label">Active</label>
+    </div>
+  </div>
+
+  <div class="card card-body mb-3">
+    <h3 class="h6">Email</h3>
+    <label class="form-label">To address (optional)</label>
+    <input class="form-control" name="email_to_address" placeholder="Leave blank to use your account email">
+  </div>
+
+  <div class="card card-body mb-3">
+    <h3 class="h6">WNS</h3>
+    <label class="form-label">Channel URI</label>
+    <input class="form-control" name="wns_channel_uri" placeholder="WNS channel URI">
+  </div>
+
+  <div class="card card-body mb-3">
+    <h3 class="h6">Gotify</h3>
+    <label class="form-label">Base URL</label>
+    <input class="form-control" name="gotify_base_url" placeholder="https://gotify.example.com">
+    <label class="form-label mt-2">Token</label>
+    <input class="form-control" type="password" name="gotify_token" placeholder="Gotify application token">
+    <label class="form-label mt-2">Priority</label>
+    <input class="form-control" name="gotify_priority" value="5">
+  </div>
+
+  <div class="card card-body mb-3">
+    <h3 class="h6">ntfy</h3>
+    <label class="form-label">Server URL</label>
+    <input class="form-control" name="ntfy_server_url" value="https://ntfy.sh">
+    <label class="form-label mt-2">Topic</label>
+    <input class="form-control" name="ntfy_topic">
+    <label class="form-label mt-2">Token (optional)</label>
+    <input class="form-control" type="password" name="ntfy_token">
+    <label class="form-label mt-2">Priority (optional)</label>
+    <input class="form-control" name="ntfy_priority">
+  </div>
+
+  <div class="card card-body mb-3">
+    <h3 class="h6">Generic webhook</h3>
+    <label class="form-label">URL</label>
+    <input class="form-control" name="webhook_url">
+    <label class="form-label mt-2">Secret (optional)</label>
+    <input class="form-control" type="password" name="webhook_secret">
+  </div>
+
+  <div class="card card-body mb-3">
+    <h3 class="h6">Generic API</h3>
+    <label class="form-label">URL</label>
+    <input class="form-control" name="generic_api_url">
+    <label class="form-label mt-2">Method</label>
+    <input class="form-control" name="generic_api_method" value="POST">
+    <label class="form-label mt-2">Token (optional)</label>
+    <input class="form-control" type="password" name="generic_api_token">
+    <label class="form-label mt-2">Headers JSON (optional)</label>
+    <textarea class="form-control" name="generic_api_headers" rows="3" placeholder='{"X-Header": "value"}'></textarea>
+  </div>
+
+  <button type="submit" class="btn btn-success">Add service</button>
   <a class="btn btn-secondary" href="/profile">Back</a>
 </form>
 

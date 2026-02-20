@@ -76,12 +76,14 @@ from ..notifications import (
     CHANNEL_GENERIC_API,
     CHANNEL_GOTIFY,
     CHANNEL_NTFY,
+    CHANNEL_TYPES,
     CHANNEL_WEBHOOK,
     CHANNEL_WNS,
-    get_user_channels,
-    get_user_notification_tag_ids,
-    set_user_notification_tag_ids,
-    upsert_user_channel,
+    create_user_notification_service,
+    delete_user_notification_service,
+    list_user_notification_services,
+    update_user_notification_service,
+    user_has_enabled_browser_service,
 )
 from ..utils.humanize import humanize_timedelta, time_left_class, seconds_to_duration_str
 from ..utils.time_utils import iso_for_datetime_local_input, now_utc, to_local
@@ -169,13 +171,18 @@ def _template_context(request: Request, user: Optional[User], db: Session | None
     # Browser notifications enabled (used by base template JS).
     if user and "browser_notifications_enabled" not in extra and db is not None:
         try:
-            enabled = (
-                db.query(UserNotificationChannel)
-                .filter(UserNotificationChannel.user_id == int(user.id))
-                .filter(UserNotificationChannel.channel_type == CHANNEL_BROWSER)
-                .filter(UserNotificationChannel.enabled.is_(True))
-                .first()
-            )
+            # New service-based browser notifications.
+            enabled = user_has_enabled_browser_service(db, user_id=int(user.id))
+            if not enabled:
+                # Legacy fallback (pre-service model).
+                legacy = (
+                    db.query(UserNotificationChannel)
+                    .filter(UserNotificationChannel.user_id == int(user.id))
+                    .filter(UserNotificationChannel.channel_type == CHANNEL_BROWSER)
+                    .filter(UserNotificationChannel.enabled.is_(True))
+                    .first()
+                )
+                enabled = bool(legacy)
             extra["browser_notifications_enabled"] = bool(enabled)
         except Exception:
             extra["browser_notifications_enabled"] = False
@@ -1171,36 +1178,20 @@ def profile_notifications_get(request: Request, db: Session = Depends(get_db)):
     if not user:
         return _redirect("/login")
 
-    tags = list_tags_for_user(db, user=user)
-    subscribed_ids = get_user_notification_tag_ids(db, user_id=int(user.id))
-    channels = get_user_channels(db, user_id=int(user.id))
-
-    def _chan(ctype: str) -> dict:
-        row = channels.get(ctype)
-        cfg = {}
-        if row and row.config_json:
-            try:
-                cfg = json.loads(row.config_json)
-            except Exception:
+    services = list_user_notification_services(db, user_id=int(user.id))
+    for svc in services:
+        try:
+            cfg = json.loads(svc.config_json) if svc.config_json else {}
+            if not isinstance(cfg, dict):
                 cfg = {}
-        if ctype == CHANNEL_GENERIC_API:
-            try:
-                if isinstance(cfg, dict) and isinstance(cfg.get("headers"), dict):
-                    cfg["headers"] = json.dumps(cfg.get("headers"), indent=2)
-            except Exception:
-                pass
-        return {"enabled": bool(row.enabled) if row else False, "config": cfg}
-
-    channel_state = {
-        CHANNEL_BROWSER: _chan(CHANNEL_BROWSER),
-        CHANNEL_EMAIL: _chan(CHANNEL_EMAIL),
-        CHANNEL_GOTIFY: _chan(CHANNEL_GOTIFY),
-        CHANNEL_NTFY: _chan(CHANNEL_NTFY),
-        CHANNEL_DISCORD: _chan(CHANNEL_DISCORD),
-        CHANNEL_WEBHOOK: _chan(CHANNEL_WEBHOOK),
-        CHANNEL_GENERIC_API: _chan(CHANNEL_GENERIC_API),
-        CHANNEL_WNS: _chan(CHANNEL_WNS),
-    }
+        except Exception:
+            cfg = {}
+        # attach convenience attribute for Jinja
+        setattr(svc, "cfg", cfg)
+        if svc.service_type == CHANNEL_GENERIC_API and isinstance(cfg.get("headers"), dict):
+            setattr(svc, "headers_pretty", json.dumps(cfg.get("headers"), indent=2))
+        else:
+            setattr(svc, "headers_pretty", "")
 
     wns_admin = get_wns_settings(db)
 
@@ -1212,9 +1203,7 @@ def profile_notifications_get(request: Request, db: Session = Depends(get_db)):
             db=db,
             error=None,
             success=None,
-            available_tags=tags,
-            subscribed_tag_ids=subscribed_ids,
-            channels=channel_state,
+            services=services,
             wns_admin_enabled=bool(wns_admin.enabled),
         ),
     )
@@ -1227,145 +1216,160 @@ async def profile_notifications_post(request: Request, db: Session = Depends(get
         return _redirect("/login")
 
     form = await request.form()
+    action = str(form.get("action") or "").strip().lower()
 
-    # Tag subscriptions.
+    def _build_cfg(service_type: str, existing: dict | None) -> dict:
+        st = str(service_type or "").strip().lower()
+        cfg = dict(existing or {})
+
+        # Browser: no config
+        if st == CHANNEL_BROWSER:
+            return {}
+
+        if st == CHANNEL_EMAIL:
+            to_addr = str(form.get("email_to_address") or "").strip()
+            if to_addr:
+                cfg["to_address"] = to_addr
+            elif existing is None:
+                cfg.pop("to_address", None)
+            return cfg
+
+        if st == CHANNEL_GOTIFY:
+            base_url = str(form.get("gotify_base_url") or "").strip()
+            token = str(form.get("gotify_token") or "")
+            priority = str(form.get("gotify_priority") or cfg.get("priority") or "5").strip()
+            if base_url:
+                cfg["base_url"] = base_url
+            if token.strip():
+                cfg["token"] = token.strip()
+            cfg["priority"] = priority
+            return cfg
+
+        if st == CHANNEL_NTFY:
+            server_url = str(form.get("ntfy_server_url") or "").strip()
+            topic = str(form.get("ntfy_topic") or "").strip()
+            token = str(form.get("ntfy_token") or "")
+            priority = str(form.get("ntfy_priority") or cfg.get("priority") or "").strip()
+            if server_url:
+                cfg["server_url"] = server_url
+            if topic:
+                cfg["topic"] = topic
+            if token.strip():
+                cfg["token"] = token.strip()
+            if priority:
+                cfg["priority"] = priority
+            return cfg
+
+        if st == CHANNEL_DISCORD:
+            webhook_url = str(form.get("discord_webhook_url") or "")
+            if webhook_url.strip():
+                cfg["webhook_url"] = webhook_url.strip()
+            return cfg
+
+        if st == CHANNEL_WEBHOOK:
+            url = str(form.get("webhook_url") or "").strip()
+            secret = str(form.get("webhook_secret") or "")
+            if url:
+                cfg["url"] = url
+            if secret.strip():
+                cfg["secret"] = secret.strip()
+            return cfg
+
+        if st == CHANNEL_GENERIC_API:
+            url = str(form.get("generic_api_url") or "").strip()
+            method = str(form.get("generic_api_method") or cfg.get("method") or "POST").strip().upper()
+            token = str(form.get("generic_api_token") or "")
+            headers_raw = str(form.get("generic_api_headers") or "").strip()
+            if url:
+                cfg["url"] = url
+            cfg["method"] = method
+            if token.strip():
+                cfg["token"] = token.strip()
+            if headers_raw:
+                try:
+                    hdrs = json.loads(headers_raw)
+                    if isinstance(hdrs, dict):
+                        cfg["headers"] = hdrs
+                except Exception:
+                    pass
+            return cfg
+
+        if st == CHANNEL_WNS:
+            channel_uri = str(form.get("wns_channel_uri") or "")
+            if channel_uri.strip():
+                cfg["channel_uri"] = channel_uri.strip()
+            return cfg
+
+        return cfg
+
+    error: str | None = None
+    success: str | None = None
+
     try:
-        tag_ids = [int(x) for x in form.getlist("tag_ids")]
-    except Exception:
-        tag_ids = []
-    set_user_notification_tag_ids(db, user_id=int(user.id), tag_ids=tag_ids)
-
-    # Load existing configs to preserve secrets when left blank.
-    existing = get_user_channels(db, user_id=int(user.id))
-
-    def _existing_cfg(ctype: str) -> dict:
-        row = existing.get(ctype)
-        if not row or not row.config_json:
-            return {}
-        try:
-            v = json.loads(row.config_json)
-            return v if isinstance(v, dict) else {}
-        except Exception:
-            return {}
-
-    # Channel toggles.
-    browser_enabled = form.get("browser_enabled") == "on"
-    email_chan_enabled = form.get("email_notifications_enabled") == "on"
-
-    gotify_enabled = form.get("gotify_enabled") == "on"
-    ntfy_enabled = form.get("ntfy_enabled") == "on"
-    discord_enabled = form.get("discord_enabled") == "on"
-    webhook_enabled = form.get("webhook_enabled") == "on"
-    generic_api_enabled = form.get("generic_api_enabled") == "on"
-    wns_enabled = form.get("wns_enabled") == "on"
-
-    # Browser + Email have no config.
-    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_BROWSER, enabled=browser_enabled, config={})
-    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_EMAIL, enabled=email_chan_enabled, config={})
-
-    # Gotify
-    gotify_cfg = _existing_cfg(CHANNEL_GOTIFY)
-    gotify_base_url = str(form.get("gotify_base_url") or "").strip()
-    gotify_token = str(form.get("gotify_token") or "")
-    gotify_priority = str(form.get("gotify_priority") or gotify_cfg.get("priority") or "5").strip()
-    if gotify_base_url:
-        gotify_cfg["base_url"] = gotify_base_url
-    if gotify_token.strip():
-        gotify_cfg["token"] = gotify_token.strip()
-    gotify_cfg["priority"] = gotify_priority
-    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_GOTIFY, enabled=gotify_enabled, config=gotify_cfg)
-
-    # ntfy
-    ntfy_cfg = _existing_cfg(CHANNEL_NTFY)
-    ntfy_server_url = str(form.get("ntfy_server_url") or "").strip()
-    ntfy_topic = str(form.get("ntfy_topic") or "").strip()
-    ntfy_token = str(form.get("ntfy_token") or "")
-    ntfy_priority = str(form.get("ntfy_priority") or ntfy_cfg.get("priority") or "").strip()
-    if ntfy_server_url:
-        ntfy_cfg["server_url"] = ntfy_server_url
-    if ntfy_topic:
-        ntfy_cfg["topic"] = ntfy_topic
-    if ntfy_token.strip():
-        ntfy_cfg["token"] = ntfy_token.strip()
-    if ntfy_priority:
-        ntfy_cfg["priority"] = ntfy_priority
-    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_NTFY, enabled=ntfy_enabled, config=ntfy_cfg)
-
-    # Discord
-    discord_cfg = _existing_cfg(CHANNEL_DISCORD)
-    discord_webhook_url = str(form.get("discord_webhook_url") or "")
-    if discord_webhook_url.strip():
-        discord_cfg["webhook_url"] = discord_webhook_url.strip()
-    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_DISCORD, enabled=discord_enabled, config=discord_cfg)
-
-    # Generic webhook
-    webhook_cfg = _existing_cfg(CHANNEL_WEBHOOK)
-    webhook_url = str(form.get("webhook_url") or "").strip()
-    webhook_secret = str(form.get("webhook_secret") or "")
-    if webhook_url:
-        webhook_cfg["url"] = webhook_url
-    if webhook_secret.strip():
-        webhook_cfg["secret"] = webhook_secret.strip()
-    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_WEBHOOK, enabled=webhook_enabled, config=webhook_cfg)
-
-    # Generic API
-    api_cfg = _existing_cfg(CHANNEL_GENERIC_API)
-    api_url = str(form.get("generic_api_url") or "").strip()
-    api_method = str(form.get("generic_api_method") or api_cfg.get("method") or "POST").strip().upper()
-    api_token = str(form.get("generic_api_token") or "")
-    api_headers_raw = str(form.get("generic_api_headers") or "").strip()
-    if api_url:
-        api_cfg["url"] = api_url
-    api_cfg["method"] = api_method
-    if api_token.strip():
-        api_cfg["token"] = api_token.strip()
-    if api_headers_raw:
-        try:
-            hdrs = json.loads(api_headers_raw)
-            if isinstance(hdrs, dict):
-                api_cfg["headers"] = hdrs
-        except Exception:
-            # ignore invalid
-            pass
-    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_GENERIC_API, enabled=generic_api_enabled, config=api_cfg)
-
-    # WNS
-    wns_cfg = _existing_cfg(CHANNEL_WNS)
-    channel_uri = str(form.get("wns_channel_uri") or "")
-    if channel_uri.strip():
-        wns_cfg["channel_uri"] = channel_uri.strip()
-    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_WNS, enabled=wns_enabled, config=wns_cfg)
-
-    tags = list_tags_for_user(db, user=user)
-    subscribed_ids = get_user_notification_tag_ids(db, user_id=int(user.id))
-    channels = get_user_channels(db, user_id=int(user.id))
-
-    def _chan(ctype: str) -> dict:
-        row = channels.get(ctype)
-        cfg = {}
-        if row and row.config_json:
+        if action == "create":
+            service_type = str(form.get("service_type") or "").strip().lower()
+            name = str(form.get("name") or "").strip() or None
+            enabled = form.get("enabled") == "on"
+            cfg = _build_cfg(service_type, None)
+            create_user_notification_service(
+                db,
+                user_id=int(user.id),
+                service_type=service_type,
+                name=name,
+                enabled=enabled,
+                config=cfg,
+            )
+            success = "Service added"
+        elif action == "update":
+            service_id = int(form.get("service_id") or "0")
+            svc = (
+                db.query(UserNotificationService)
+                .filter(UserNotificationService.id == int(service_id))
+                .filter(UserNotificationService.user_id == int(user.id))
+                .first()
+            )
+            if not svc:
+                raise ValueError("Service not found")
             try:
-                cfg = json.loads(row.config_json)
+                existing_cfg = json.loads(svc.config_json) if svc.config_json else {}
+                if not isinstance(existing_cfg, dict):
+                    existing_cfg = {}
             except Exception:
+                existing_cfg = {}
+            name = str(form.get("name") or "").strip() or None
+            enabled = form.get("enabled") == "on"
+            cfg = _build_cfg(str(svc.service_type), existing_cfg)
+            update_user_notification_service(
+                db,
+                user_id=int(user.id),
+                service_id=int(service_id),
+                name=name,
+                enabled=enabled,
+                config=cfg,
+            )
+            success = "Saved"
+        elif action == "delete":
+            service_id = int(form.get("service_id") or "0")
+            ok = delete_user_notification_service(db, user_id=int(user.id), service_id=int(service_id))
+            success = "Deleted" if ok else "Not found"
+        else:
+            raise ValueError("Unknown action")
+    except Exception as e:
+        error = str(e)
+
+    services = list_user_notification_services(db, user_id=int(user.id))
+    for svc in services:
+        try:
+            cfg = json.loads(svc.config_json) if svc.config_json else {}
+            if not isinstance(cfg, dict):
                 cfg = {}
-        if ctype == CHANNEL_GENERIC_API:
-            try:
-                if isinstance(cfg, dict) and isinstance(cfg.get("headers"), dict):
-                    cfg["headers"] = json.dumps(cfg.get("headers"), indent=2)
-            except Exception:
-                pass
-        return {"enabled": bool(row.enabled) if row else False, "config": cfg}
-
-    channel_state = {
-        CHANNEL_BROWSER: _chan(CHANNEL_BROWSER),
-        CHANNEL_EMAIL: _chan(CHANNEL_EMAIL),
-        CHANNEL_GOTIFY: _chan(CHANNEL_GOTIFY),
-        CHANNEL_NTFY: _chan(CHANNEL_NTFY),
-        CHANNEL_DISCORD: _chan(CHANNEL_DISCORD),
-        CHANNEL_WEBHOOK: _chan(CHANNEL_WEBHOOK),
-        CHANNEL_GENERIC_API: _chan(CHANNEL_GENERIC_API),
-        CHANNEL_WNS: _chan(CHANNEL_WNS),
-    }
+        except Exception:
+            cfg = {}
+        setattr(svc, "cfg", cfg)
+        if svc.service_type == CHANNEL_GENERIC_API and isinstance(cfg.get("headers"), dict):
+            setattr(svc, "headers_pretty", json.dumps(cfg.get("headers"), indent=2))
+        else:
+            setattr(svc, "headers_pretty", "")
 
     wns_admin = get_wns_settings(db)
 
@@ -1375,15 +1379,12 @@ async def profile_notifications_post(request: Request, db: Session = Depends(get
             request,
             user,
             db=db,
-            error=None,
-            success="Saved",
-            available_tags=tags,
-            subscribed_tag_ids=subscribed_ids,
-            channels=channel_state,
+            error=error,
+            success=success,
+            services=services,
             wns_admin_enabled=bool(wns_admin.enabled),
         ),
     )
-
 
 @router.get("/notifications/stream")
 async def notifications_stream(request: Request):
@@ -1402,12 +1403,21 @@ async def notifications_stream(request: Request):
     db0 = SessionLocal()
     try:
         enabled = (
-            db0.query(UserNotificationChannel)
-            .filter(UserNotificationChannel.user_id == int(user_id))
-            .filter(UserNotificationChannel.channel_type == CHANNEL_BROWSER)
-            .filter(UserNotificationChannel.enabled.is_(True))
+            db0.query(UserNotificationService.id)
+            .filter(UserNotificationService.user_id == int(user_id))
+            .filter(UserNotificationService.service_type == CHANNEL_BROWSER)
+            .filter(UserNotificationService.enabled.is_(True))
             .first()
         )
+        if not enabled:
+            # Legacy fallback (pre-service model).
+            enabled = (
+                db0.query(UserNotificationChannel.id)
+                .filter(UserNotificationChannel.user_id == int(user_id))
+                .filter(UserNotificationChannel.channel_type == CHANNEL_BROWSER)
+                .filter(UserNotificationChannel.enabled.is_(True))
+                .first()
+            )
         if not enabled:
             return JSONResponse({"error": "browser_notifications_disabled"}, status_code=404)
 
@@ -1420,7 +1430,12 @@ async def notifications_stream(request: Request):
             except Exception:
                 last_id = 0
         else:
-            max_id = db0.query(func.max(NotificationEvent.id)).filter(NotificationEvent.user_id == int(user_id)).scalar()
+            max_id = (
+                db0.query(func.max(NotificationEvent.id))
+                .filter(NotificationEvent.user_id == int(user_id))
+                .filter(NotificationEvent.service_type == CHANNEL_BROWSER)
+                .scalar()
+            )
             last_id = int(max_id or 0)
     finally:
         db0.close()
@@ -1436,6 +1451,7 @@ async def notifications_stream(request: Request):
                 rows = (
                     dbx.query(NotificationEvent)
                     .filter(NotificationEvent.user_id == int(user_id))
+                    .filter(NotificationEvent.service_type == CHANNEL_BROWSER)
                     .filter(NotificationEvent.id > int(last_id))
                     .order_by(NotificationEvent.id.asc())
                     .limit(25)

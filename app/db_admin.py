@@ -20,6 +20,7 @@ from .models import (
     Theme,
     User,
     UserNotificationChannel,
+    UserNotificationService,
     UserNotificationTag,
 )
 from .version import APP_VERSION
@@ -161,10 +162,10 @@ def export_db_json(db: Session) -> Dict[str, Any]:
                 "description": t.description,
                 "url": t.url,
                 "due_date_utc": _dt(t.due_date_utc),
-                "recurrence_type": t.recurrence_type,
+                "recurrence_type": (t.recurrence_type.value if hasattr(t.recurrence_type, "value") else t.recurrence_type),
                 "recurrence_interval_seconds": t.recurrence_interval_seconds,
                 "recurrence_times": t.recurrence_times,
-                "status": t.status,
+                "status": (t.status.value if hasattr(t.status, "value") else t.status),
                 "completed_at_utc": _dt(t.completed_at_utc),
                 "deleted_at_utc": _dt(t.deleted_at_utc),
                 "created_at": _dt(t.created_at),
@@ -181,6 +182,7 @@ def export_db_json(db: Session) -> Dict[str, Any]:
     # Optional tables added for notifications.
     user_notification_tags: List[Dict[str, Any]] = []
     user_notification_channels: List[Dict[str, Any]] = []
+    user_notification_services: List[Dict[str, Any]] = []
 
     try:
         rows = db.execute(text("SELECT user_id, tag_id, created_at FROM user_notification_tags ORDER BY user_id, tag_id")).fetchall()
@@ -216,6 +218,30 @@ def export_db_json(db: Session) -> Dict[str, Any]:
     except Exception:
         user_notification_channels = []
 
+    try:
+        rows = db.execute(
+            text(
+                "SELECT id, user_id, service_type, name, enabled, config_json, tag_id, created_at, updated_at "
+                "FROM user_notification_services ORDER BY user_id, id"
+            )
+        ).fetchall()
+        for r in rows:
+            user_notification_services.append(
+                {
+                    "id": int(r[0]),
+                    "user_id": int(r[1]),
+                    "service_type": str(r[2]),
+                    "name": (str(r[3]) if r[3] is not None else None),
+                    "enabled": bool(r[4]),
+                    "config_json": r[5],
+                    "tag_id": int(r[6]),
+                    "created_at": _dt(r[7]) if isinstance(r[7], datetime) else (str(r[7]) if r[7] is not None else None),
+                    "updated_at": _dt(r[8]) if isinstance(r[8], datetime) else (str(r[8]) if r[8] is not None else None),
+                }
+            )
+    except Exception:
+        user_notification_services = []
+
     return {
         "exported_at_utc": datetime.utcnow().replace(tzinfo=None).isoformat(),
         "app_version": APP_VERSION,
@@ -226,6 +252,7 @@ def export_db_json(db: Session) -> Dict[str, Any]:
         "task_tags": assoc,
         "user_notification_tags": user_notification_tags,
         "user_notification_channels": user_notification_channels,
+        "user_notification_services": user_notification_services,
     }
 
 
@@ -681,6 +708,10 @@ def import_db_json(db: Session, payload: Dict[str, Any], *, replace: bool = True
             except Exception:
                 pass
             try:
+                db.execute(text("DELETE FROM user_notification_services"))
+            except Exception:
+                pass
+            try:
                 db.execute(text("DELETE FROM user_notification_channels"))
             except Exception:
                 pass
@@ -732,6 +763,34 @@ def import_db_json(db: Session, payload: Dict[str, Any], *, replace: bool = True
                 continue
             db.add(Tag(id=int(t["id"]), name=str(t["name"]).strip()))
         db.flush()
+
+        # Optional: per-user notification service entries (multi-entry, routed by tag).
+        uns = payload.get("user_notification_services")
+        if isinstance(uns, list):
+            for r in uns:
+                try:
+                    db.execute(
+                        text(
+                            "INSERT OR REPLACE INTO user_notification_services(" 
+                            "id, user_id, service_type, name, enabled, config_json, tag_id, created_at, updated_at) "
+                            "VALUES (:id, :user_id, :service_type, :name, :enabled, :config_json, :tag_id, :created_at, :updated_at)"
+                        ),
+                        {
+                            "id": int(r.get("id")),
+                            "user_id": int(r.get("user_id")),
+                            "service_type": str(r.get("service_type")),
+                            "name": r.get("name"),
+                            "enabled": 1 if bool(r.get("enabled", True)) else 0,
+                            "config_json": r.get("config_json"),
+                            "tag_id": int(r.get("tag_id")),
+                            "created_at": r.get("created_at")
+                            or datetime.utcnow().replace(tzinfo=None).isoformat(),
+                            "updated_at": r.get("updated_at")
+                            or datetime.utcnow().replace(tzinfo=None).isoformat(),
+                        },
+                    )
+                except Exception:
+                    continue
 
         # Optional: per-user notification subscriptions/channels (added after v00.01.02).
         unt = payload.get("user_notification_tags")

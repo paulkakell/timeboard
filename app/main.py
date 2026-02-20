@@ -27,7 +27,7 @@ from .meta_settings import (
 from .migrations import ensure_db_schema
 from .models import Task, TaskStatus, User
 from .notifications import EVENT_PAST_DUE, notify_task_event
-from .routers import api_auth, api_tags, api_tasks, api_users, ui
+from .routers import api_admin, api_auth, api_notifications, api_tags, api_tasks, api_users, ui
 from .utils.time_utils import format_dt_display, to_local
 from .version import APP_VERSION
 
@@ -53,6 +53,8 @@ app.include_router(api_auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(api_users.router, prefix="/api/users", tags=["users"])
 app.include_router(api_tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(api_tags.router, prefix="/api/tags", tags=["tags"])
+app.include_router(api_notifications.router, prefix="/api/notifications", tags=["notifications"])
+app.include_router(api_admin.router, prefix="/api/admin", tags=["admin"])
 
 app.include_router(ui.router)
 

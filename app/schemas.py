@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -129,3 +129,111 @@ class TaskOut(BaseModel):
 class TaskCompleteResponse(BaseModel):
     completed_task: TaskOut
     spawned_task: Optional[TaskOut] = None
+
+
+# ---- Notifications (service-based) -------------------------------------------------
+
+
+class NotificationServiceBase(BaseModel):
+    service_type: str = Field(..., description="Service type, e.g. browser/email/gotify/ntfy/webhook/generic_api/wns")
+    name: Optional[str] = Field(default=None, max_length=128)
+    enabled: bool = Field(default=True)
+    config: Dict[str, Any] = Field(default_factory=dict, description="Service-specific configuration payload")
+
+
+class NotificationServiceCreate(NotificationServiceBase):
+    pass
+
+
+class NotificationServiceUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=128)
+    enabled: Optional[bool] = None
+    config: Optional[Dict[str, Any]] = None
+
+
+class NotificationServiceOut(BaseModel):
+    id: int
+    user_id: int
+    service_type: str
+    name: Optional[str]
+    enabled: bool
+    tag: str
+    config: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationEventOut(BaseModel):
+    id: int
+    user_id: int
+    task_id: Optional[int]
+    service_id: Optional[int]
+    service_type: Optional[str]
+    event_type: str
+    event_key: Optional[str]
+    title: str
+    message: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ---- Admin settings ----------------------------------------------------------------
+
+
+class AdminEmailSettingsOut(BaseModel):
+    enabled: bool
+    smtp_host: str
+    smtp_port: int
+    smtp_username: str
+    smtp_from: str
+    use_tls: bool
+    reminder_interval_minutes: int
+    reset_token_minutes: int
+    smtp_password_set: bool = Field(default=False, description="True if a password is stored in DB (not returned).")
+
+
+class AdminEmailSettingsUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = Field(default=None, description="If omitted/blank, existing password can be kept.")
+    smtp_from: Optional[str] = None
+    use_tls: Optional[bool] = None
+    reminder_interval_minutes: Optional[int] = None
+    reset_token_minutes: Optional[int] = None
+    keep_existing_password: bool = True
+
+
+class AdminLoggingSettingsOut(BaseModel):
+    level: str
+    retention_days: int
+
+
+class AdminLoggingSettingsUpdate(BaseModel):
+    level: Optional[str] = None
+    retention_days: Optional[int] = None
+
+
+class AdminWNSSettingsOut(BaseModel):
+    enabled: bool
+    package_sid: str
+    client_secret_set: bool = Field(default=False, description="True if a client secret is stored in DB (not returned).")
+
+
+class AdminWNSSettingsUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    package_sid: Optional[str] = None
+    client_secret: Optional[str] = Field(default=None, description="If omitted/blank, existing secret can be kept.")
+    keep_existing_secret: bool = True
+
+
+class LogFileOut(BaseModel):
+    filename: str
+    size_bytes: int
+    modified_at_iso: str
