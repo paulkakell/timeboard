@@ -121,6 +121,68 @@ def ensure_db_schema(engine: Engine) -> MigrationReport:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_prt_used ON password_reset_tokens(used_at_utc)"))
             applied.append("create_table:password_reset_tokens")
 
+        # User notification tag subscriptions
+        if not _table_exists(conn, "user_notification_tags"):
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS user_notification_tags ("
+                    "  user_id INTEGER NOT NULL,"
+                    "  tag_id INTEGER NOT NULL,"
+                    "  created_at DATETIME NOT NULL,"
+                    "  PRIMARY KEY(user_id, tag_id),"
+                    "  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,"
+                    "  FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE"
+                    ")"
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_unt_user_id ON user_notification_tags(user_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_unt_tag_id ON user_notification_tags(tag_id)"))
+            applied.append("create_table:user_notification_tags")
+
+        # User notification channels
+        if not _table_exists(conn, "user_notification_channels"):
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS user_notification_channels ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  user_id INTEGER NOT NULL,"
+                    "  channel_type VARCHAR(32) NOT NULL,"
+                    "  enabled BOOLEAN NOT NULL DEFAULT 0,"
+                    "  config_json TEXT NULL,"
+                    "  created_at DATETIME NOT NULL,"
+                    "  updated_at DATETIME NOT NULL,"
+                    "  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE"
+                    ")"
+                )
+            )
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_user_notification_channels ON user_notification_channels(user_id, channel_type)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_unc_user_id ON user_notification_channels(user_id)"))
+            applied.append("create_table:user_notification_channels")
+
+        # Notification events
+        if not _table_exists(conn, "notification_events"):
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS notification_events ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  user_id INTEGER NOT NULL,"
+                    "  task_id INTEGER NULL,"
+                    "  event_type VARCHAR(32) NOT NULL,"
+                    "  event_key VARCHAR(255) NULL UNIQUE,"
+                    "  title VARCHAR(255) NOT NULL,"
+                    "  message TEXT NULL,"
+                    "  created_at DATETIME NOT NULL,"
+                    "  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,"
+                    "  FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE"
+                    ")"
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_user_id ON notification_events(user_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_task_id ON notification_events(task_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_created_at ON notification_events(created_at)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_event_type ON notification_events(event_type)"))
+            applied.append("create_table:notification_events")
+
         # Set DB version to current app version (schema and app version are aligned for now).
         _set_meta(conn, "db_version", APP_VERSION)
 

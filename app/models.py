@@ -105,6 +105,77 @@ class AppMeta(Base):
     )
 
 
+class UserNotificationTag(Base):
+    """A user's subscription to a tag for notifications.
+
+    If a task owned by the user has ANY subscribed tag, it can trigger
+    notifications on task lifecycle changes.
+    """
+
+    __tablename__ = "user_notification_tags"
+
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tag_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("tags.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UserNotificationChannel(Base):
+    """Per-user notification channel configuration.
+
+    `channel_type` is a short string (e.g. 'email', 'gotify').
+    `config_json` stores channel-specific settings.
+    """
+
+    __tablename__ = "user_notification_channels"
+    __table_args__ = (UniqueConstraint("user_id", "channel_type", name="uq_user_notification_channels"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    channel_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class NotificationEvent(Base):
+    """A record of a notification-worthy task event.
+
+    These rows back browser notifications (SSE) and also provide deduping for
+    scheduler-driven events like `past_due`.
+    """
+
+    __tablename__ = "notification_events"
+    __table_args__ = (UniqueConstraint("event_key", name="uq_notification_events_event_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    # Optional de-duplication key. Multiple NULLs are allowed.
+    event_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 class Tag(Base):
     __tablename__ = "tags"
     __table_args__ = (UniqueConstraint("name", name="uq_tags_name"),)

@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Notifications</h1>
+
+{% if error %}
+<div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+<form method="post" action="/profile/notifications">
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="card card-body mb-3">
+        <h2 class="h6">Tags</h2>
+        <p class="text-muted">Notifications are triggered for tasks that have at least one of the selected tags.</p>
+
+        {% if available_tags %}
+          <div class="row">
+            {% for tag in available_tags %}
+              <div class="col-md-6">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="tag_ids" value="{{ tag.id }}" id="tag_{{ tag.id }}" {% if tag.id in subscribed_tag_ids %}checked{% endif %}>
+                  <label class="form-check-label" for="tag_{{ tag.id }}">{{ tag.name }}</label>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="text-muted">No tags yet. Create tags first, then return here to subscribe.</div>
+        {% endif %}
+      </div>
+
+      <div class="card card-body mb-3">
+        <h2 class="h6">Browser notifications</h2>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" name="browser_enabled" id="browser_enabled" {% if channels['browser']['enabled'] %}checked{% endif %}>
+          <label class="form-check-label" for="browser_enabled">Enable browser notifications</label>
+        </div>
+        <div class="form-text">
+          Uses an in-page connection (SSE). Your browser may ask for permission the next time you load a page.
+        </div>
+      </div>
+
+      <div class="card card-body mb-3">
+        <h2 class="h6">Email</h2>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" name="email_notifications_enabled" id="email_notifications_enabled" {% if channels['email']['enabled'] %}checked{% endif %}>
+          <label class="form-check-label" for="email_notifications_enabled">Send email notifications</label>
+        </div>
+        <div class="form-text">
+          Sent to your user email address ({{ current_user.email or 'not set' }}). Requires admin SMTP configuration.
+        </div>
+      </div>
+
+      <div class="card card-body mb-3">
+        <h2 class="h6">Windows Push Notification Services (WNS)</h2>
+        {% if not wns_admin_enabled %}
+          <div class="alert alert-warning mb-2">WNS is disabled or not configured by the admin.</div>
+        {% endif %}
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" name="wns_enabled" id="wns_enabled" {% if channels['wns']['enabled'] %}checked{% endif %} {% if not wns_admin_enabled %}disabled{% endif %}>
+          <label class="form-check-label" for="wns_enabled">Enable WNS notifications</label>
+        </div>
+        <div class="mb-2 mt-2">
+          <label class="form-label">Channel URI</label>
+          <input class="form-control" name="wns_channel_uri" value="{{ channels['wns']['config'].get('channel_uri','') }}" {% if not wns_admin_enabled %}disabled{% endif %}>
+          <div class="form-text">Paste the per-device WNS channel URI here.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card card-body mb-3">
+        <h2 class="h6">Gotify</h2>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" name="gotify_enabled" id="gotify_enabled" {% if channels['gotify']['enabled'] %}checked{% endif %}>
+          <label class="form-check-label" for="gotify_enabled">Enable Gotify</label>
+        </div>
+        <div class="mb-2 mt-2">
+          <label class="form-label">Base URL</label>
+          <input class="form-control" name="gotify_base_url" value="{{ channels['gotify']['config'].get('base_url','') }}" placeholder="https://gotify.example.com">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Token</label>
+          <input class="form-control" type="password" name="gotify_token" value="" placeholder="Leave blank to keep existing">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Priority</label>
+          <input class="form-control" name="gotify_priority" value="{{ channels['gotify']['config'].get('priority','5') }}">
+        </div>
+      </div>
+
+      <div class="card card-body mb-3">
+        <h2 class="h6">ntfy</h2>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" name="ntfy_enabled" id="ntfy_enabled" {% if channels['ntfy']['enabled'] %}checked{% endif %}>
+          <label class="form-check-label" for="ntfy_enabled">Enable ntfy</label>
+        </div>
+        <div class="mb-2 mt-2">
+          <label class="form-label">Server URL</label>
+          <input class="form-control" name="ntfy_server_url" value="{{ channels['ntfy']['config'].get('server_url','https://ntfy.sh') }}">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Topic</label>
+          <input class="form-control" name="ntfy_topic" value="{{ channels['ntfy']['config'].get('topic','') }}">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Token (optional)</label>
+          <input class="form-control" type="password" name="ntfy_token" value="" placeholder="Leave blank to keep existing">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Priority (optional)</label>
+          <input class="form-control" name="ntfy_priority" value="{{ channels['ntfy']['config'].get('priority','') }}">
+        </div>
+      </div>
+
+      <div class="card card-body mb-3">
+        <h2 class="h6">Discord</h2>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" name="discord_enabled" id="discord_enabled" {% if channels['discord']['enabled'] %}checked{% endif %}>
+          <label class="form-check-label" for="discord_enabled">Enable Discord</label>
+        </div>
+        <div class="mb-2 mt-2">
+          <label class="form-label">Webhook URL</label>
+          <input class="form-control" type="password" name="discord_webhook_url" value="" placeholder="Leave blank to keep existing">
+        </div>
+      </div>
+
+      <div class="card card-body mb-3">
+        <h2 class="h6">Generic webhook</h2>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" name="webhook_enabled" id="webhook_enabled" {% if channels['webhook']['enabled'] %}checked{% endif %}>
+          <label class="form-check-label" for="webhook_enabled">Enable webhook</label>
+        </div>
+        <div class="mb-2 mt-2">
+          <label class="form-label">URL</label>
+          <input class="form-control" name="webhook_url" value="{{ channels['webhook']['config'].get('url','') }}">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Secret (optional)</label>
+          <input class="form-control" type="password" name="webhook_secret" value="" placeholder="Leave blank to keep existing">
+        </div>
+      </div>
+
+      <div class="card card-body mb-3">
+        <h2 class="h6">Generic API</h2>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" name="generic_api_enabled" id="generic_api_enabled" {% if channels['generic_api']['enabled'] %}checked{% endif %}>
+          <label class="form-check-label" for="generic_api_enabled">Enable API call</label>
+        </div>
+        <div class="mb-2 mt-2">
+          <label class="form-label">URL</label>
+          <input class="form-control" name="generic_api_url" value="{{ channels['generic_api']['config'].get('url','') }}">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Method</label>
+          <input class="form-control" name="generic_api_method" value="{{ channels['generic_api']['config'].get('method','POST') }}">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Token (optional)</label>
+          <input class="form-control" type="password" name="generic_api_token" value="" placeholder="Leave blank to keep existing">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Headers JSON (optional)</label>
+          <textarea class="form-control" name="generic_api_headers" rows="3" placeholder='{"X-Header": "value"}'>{{ channels['generic_api']['config'].get('headers','') }}</textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">Save</button>
+  <a class="btn btn-secondary" href="/profile">Back</a>
+</form>
+
+{% endblock %}

@@ -39,5 +39,44 @@
   document.addEventListener('DOMContentLoaded', function () {
     applySystemTheme();
     initRecurrenceForm();
+
+    // Browser notifications (best-effort): EventSource + Notification API.
+    try {
+      const enabled = document.body && document.body.getAttribute('data-browser-notifications-enabled') === '1';
+      if (enabled && ('EventSource' in window)) {
+        if ('Notification' in window && Notification.permission === 'default') {
+          // Request once on page load when user explicitly enabled browser notifications.
+          try {
+            Notification.requestPermission();
+          } catch (e) {
+            // ignore
+          }
+        }
+
+        const es = new EventSource('/notifications/stream');
+        es.addEventListener('notification', function (ev) {
+          try {
+            const payload = JSON.parse(ev.data);
+            if (!payload) return;
+
+            if ('Notification' in window && Notification.permission === 'granted') {
+              const n = new Notification(payload.title || 'Timeboard', {
+                body: payload.message || ''
+              });
+              n.onclick = function () {
+                try { window.focus(); } catch (e) {}
+                if (payload.task_id) {
+                  window.location.href = '/tasks/' + payload.task_id + '/edit';
+                }
+              };
+            }
+          } catch (e) {
+            // ignore
+          }
+        });
+      }
+    } catch (e) {
+      // ignore
+    }
   });
 })();

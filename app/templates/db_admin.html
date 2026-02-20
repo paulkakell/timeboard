@@ -57,6 +57,44 @@
   </div>
 </div>
 
+<div class="row g-3 mt-1">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">Automatic Backups</div>
+      <div class="card-body">
+        <p class="small text-muted mb-2">
+          Automated backups are written to <code>{{ backup_dir or '/data/backups' }}</code>.
+          {% if backup_count is defined %}Current backups: <strong>{{ backup_count }}</strong>.{% endif %}
+          {% if latest_backup %}Latest: <code>{{ latest_backup.name }}</code> ({{ latest_backup.mtime_utc }}).{% endif %}
+        </p>
+
+        <form method="post" action="/admin/database/auto-backups">
+          <div class="row g-2 align-items-end">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Frequency</label>
+              <select class="form-select" name="frequency">
+                {% for val, label in (auto_backup_frequency_options or []) %}
+                  <option value="{{ val }}" {% if (auto_backup_frequency or 'daily') == val %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="col-12 col-md-4">
+              <label class="form-label">Retention (days)</label>
+              <input class="form-control" type="number" name="retention_days" min="0" max="3650" value="{{ auto_backup_retention_days or 0 }}">
+              <div class="form-text">0 = keep forever (no purge).</div>
+            </div>
+
+            <div class="col-12 col-md-4 d-grid">
+              <button class="btn btn-primary" type="submit">Save Backup Settings</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="mt-3">
   <a class="btn btn-outline-secondary" href="/admin/users">Back to Users</a>
 </div>
