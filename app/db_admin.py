@@ -9,7 +9,19 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .crud import normalize_email
-from .models import AppMeta, RecurrenceType, Tag, Task, TaskStatus, TaskTag, Theme, User
+from .models import (
+    AppMeta,
+    NotificationEvent,
+    RecurrenceType,
+    Tag,
+    Task,
+    TaskStatus,
+    TaskTag,
+    Theme,
+    User,
+    UserNotificationChannel,
+    UserNotificationTag,
+)
 from .version import APP_VERSION
 
 
@@ -166,6 +178,44 @@ def export_db_json(db: Session) -> Dict[str, Any]:
     for r in rows:
         assoc.append({"task_id": int(r[0]), "tag_id": int(r[1])})
 
+    # Optional tables added for notifications.
+    user_notification_tags: List[Dict[str, Any]] = []
+    user_notification_channels: List[Dict[str, Any]] = []
+
+    try:
+        rows = db.execute(text("SELECT user_id, tag_id, created_at FROM user_notification_tags ORDER BY user_id, tag_id")).fetchall()
+        for r in rows:
+            user_notification_tags.append(
+                {
+                    "user_id": int(r[0]),
+                    "tag_id": int(r[1]),
+                    "created_at": _dt(r[2]) if isinstance(r[2], datetime) else (str(r[2]) if r[2] is not None else None),
+                }
+            )
+    except Exception:
+        user_notification_tags = []
+
+    try:
+        rows = db.execute(
+            text(
+                "SELECT user_id, channel_type, enabled, config_json, created_at, updated_at "
+                "FROM user_notification_channels ORDER BY user_id, channel_type"
+            )
+        ).fetchall()
+        for r in rows:
+            user_notification_channels.append(
+                {
+                    "user_id": int(r[0]),
+                    "channel_type": str(r[1]),
+                    "enabled": bool(r[2]),
+                    "config_json": r[3],
+                    "created_at": _dt(r[4]) if isinstance(r[4], datetime) else (str(r[4]) if r[4] is not None else None),
+                    "updated_at": _dt(r[5]) if isinstance(r[5], datetime) else (str(r[5]) if r[5] is not None else None),
+                }
+            )
+    except Exception:
+        user_notification_channels = []
+
     return {
         "exported_at_utc": datetime.utcnow().replace(tzinfo=None).isoformat(),
         "app_version": APP_VERSION,
@@ -174,6 +224,8 @@ def export_db_json(db: Session) -> Dict[str, Any]:
         "tags": tags,
         "tasks": tasks,
         "task_tags": assoc,
+        "user_notification_tags": user_notification_tags,
+        "user_notification_channels": user_notification_channels,
     }
 
 
@@ -624,6 +676,18 @@ def import_db_json(db: Session, payload: Dict[str, Any], *, replace: bool = True
     try:
         if replace:
             # Delete in dependency order.
+            try:
+                db.execute(text("DELETE FROM notification_events"))
+            except Exception:
+                pass
+            try:
+                db.execute(text("DELETE FROM user_notification_channels"))
+            except Exception:
+                pass
+            try:
+                db.execute(text("DELETE FROM user_notification_tags"))
+            except Exception:
+                pass
             db.execute(text("DELETE FROM task_tags"))
             db.execute(text("DELETE FROM tasks"))
             db.execute(text("DELETE FROM tags"))
@@ -668,6 +732,50 @@ def import_db_json(db: Session, payload: Dict[str, Any], *, replace: bool = True
                 continue
             db.add(Tag(id=int(t["id"]), name=str(t["name"]).strip()))
         db.flush()
+
+        # Optional: per-user notification subscriptions/channels (added after v00.01.02).
+        unt = payload.get("user_notification_tags")
+        if isinstance(unt, list):
+            for r in unt:
+                try:
+                    db.execute(
+                        text(
+                            "INSERT OR IGNORE INTO user_notification_tags(user_id, tag_id, created_at) "
+                            "VALUES (:user_id, :tag_id, :created_at)"
+                        ),
+                        {
+                            "user_id": int(r.get("user_id")),
+                            "tag_id": int(r.get("tag_id")),
+                            "created_at": r.get("created_at")
+                            or datetime.utcnow().replace(tzinfo=None).isoformat(),
+                        },
+                    )
+                except Exception:
+                    continue
+
+        unc = payload.get("user_notification_channels")
+        if isinstance(unc, list):
+            for r in unc:
+                try:
+                    db.execute(
+                        text(
+                            "INSERT OR REPLACE INTO user_notification_channels(" 
+                            "user_id, channel_type, enabled, config_json, created_at, updated_at) "
+                            "VALUES (:user_id, :channel_type, :enabled, :config_json, :created_at, :updated_at)"
+                        ),
+                        {
+                            "user_id": int(r.get("user_id")),
+                            "channel_type": str(r.get("channel_type")),
+                            "enabled": 1 if bool(r.get("enabled")) else 0,
+                            "config_json": r.get("config_json"),
+                            "created_at": r.get("created_at")
+                            or datetime.utcnow().replace(tzinfo=None).isoformat(),
+                            "updated_at": r.get("updated_at")
+                            or datetime.utcnow().replace(tzinfo=None).isoformat(),
+                        },
+                    )
+                except Exception:
+                    continue
 
         # Insert tasks
         for t in tasks:

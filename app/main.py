@@ -9,6 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import joinedload
 from starlette.middleware.sessions import SessionMiddleware
 
 from .config import get_settings
@@ -16,8 +17,16 @@ from .crud import create_user, purge_archived_tasks
 from .db_admin import backup_database_json, get_auto_backup_settings, purge_backup_files
 from .db import Base, SessionLocal, engine
 from .emailer import build_overdue_reminder_email, email_enabled, send_email
+from .logging_setup import apply_log_level, purge_old_logs, setup_logging
+from .meta_settings import (
+    get_email_settings,
+    get_logging_settings,
+    seed_email_settings_from_legacy_yaml,
+    seed_logging_settings_from_legacy_yaml,
+)
 from .migrations import ensure_db_schema
 from .models import Task, TaskStatus, User
+from .notifications import EVENT_PAST_DUE, notify_task_event
 from .routers import api_auth, api_tags, api_tasks, api_users, ui
 from .utils.time_utils import format_dt_display, to_local
 from .version import APP_VERSION
@@ -25,7 +34,9 @@ from .version import APP_VERSION
 
 settings = get_settings()
 
-logging.basicConfig(level=getattr(logging, settings.logging.level.upper(), logging.INFO))
+# File + stdout logging (initially seeded from settings.yml; can be overridden
+# from the database after startup).
+setup_logging(level=settings.logging.level)
 logger = logging.getLogger("timeboard")
 
 
@@ -47,6 +58,215 @@ app.include_router(ui.router)
 
 
 scheduler: BackgroundScheduler | None = None
+
+
+def _configure_email_jobs(app: FastAPI, sched: BackgroundScheduler) -> None:
+    """(Re)configure email reminder jobs.
+
+    Email settings are stored in the database (app_meta) so they can be changed
+    from the UI without editing settings.yml.
+    """
+
+    dbj = SessionLocal()
+    try:
+        cfg = get_email_settings(dbj)
+    finally:
+        dbj.close()
+
+    # Remove existing reminders job.
+    try:
+        sched.remove_job("overdue_reminders")
+    except Exception:
+        pass
+
+    # Store current config snapshot for UI rendering/debug.
+    app.state.email_config = {
+        "enabled": bool(cfg.enabled),
+        "smtp_host": str(cfg.smtp_host or ""),
+        "smtp_port": int(cfg.smtp_port),
+        "smtp_username": str(cfg.smtp_username or ""),
+        "smtp_from": str(cfg.smtp_from or ""),
+        "use_tls": bool(cfg.use_tls),
+        "reminder_interval_minutes": int(cfg.reminder_interval_minutes),
+        "reset_token_minutes": int(cfg.reset_token_minutes),
+    }
+
+    if not cfg.enabled or not cfg.smtp_host or int(cfg.reminder_interval_minutes) <= 0:
+        return
+
+    def _reminder_job() -> None:
+        dbx = SessionLocal()
+        try:
+            if not email_enabled(dbx):
+                return
+
+            now = datetime.utcnow().replace(tzinfo=None)
+
+            # Find overdue active tasks for users with email addresses.
+            q = (
+                dbx.query(Task)
+                .join(User, User.id == Task.user_id)
+                .filter(Task.status == TaskStatus.active)
+                .filter(Task.due_date_utc < now)
+                .filter(User.email.is_not(None))
+            )
+
+            tasks = q.all()
+            if not tasks:
+                return
+
+            base_url = _public_base_url()
+            dashboard_url = f"{base_url}/dashboard" if base_url else ""
+
+            grouped: dict[int, list[Task]] = {}
+            for t in tasks:
+                grouped.setdefault(int(t.user_id), []).append(t)
+
+            for user_id, items in grouped.items():
+                user = dbx.query(User).filter(User.id == user_id).first()
+                if not user or not user.email:
+                    continue
+
+                task_rows = []
+                for t in sorted(items, key=lambda x: x.due_date_utc):
+                    task_rows.append(
+                        {
+                            "name": t.name,
+                            "task_type": t.task_type,
+                            "due": format_dt_display(t.due_date_utc),
+                        }
+                    )
+
+                subject, body = build_overdue_reminder_email(
+                    username=user.username,
+                    tasks=task_rows,
+                    dashboard_url=dashboard_url or "(dashboard URL not configured)",
+                )
+
+                try:
+                    send_email(to_address=user.email, subject=subject, body_text=body, db=dbx)
+                except Exception:
+                    logger.exception("Failed to send overdue reminder to %s", user.email)
+
+        except Exception:
+            logger.exception("Error while sending overdue reminders")
+        finally:
+            dbx.close()
+
+    sched.add_job(
+        _reminder_job,
+        "interval",
+        minutes=int(cfg.reminder_interval_minutes),
+        id="overdue_reminders",
+        replace_existing=True,
+    )
+
+
+def _configure_logging_jobs(app: FastAPI, sched: BackgroundScheduler) -> None:
+    """(Re)configure log retention and apply current log level."""
+
+    dbj = SessionLocal()
+    try:
+        cfg = get_logging_settings(dbj)
+    finally:
+        dbj.close()
+
+    # Apply log level immediately.
+    try:
+        apply_log_level(cfg.level)
+    except Exception:
+        logger.exception("Failed to apply log level")
+
+    # Remove existing retention job.
+    try:
+        sched.remove_job("log_retention")
+    except Exception:
+        pass
+
+    app.state.logging_config = {"level": cfg.level, "retention_days": int(cfg.retention_days)}
+
+    # Best-effort purge at startup.
+    try:
+        purged = purge_old_logs(retention_days=int(cfg.retention_days))
+        if purged:
+            logger.info("Purged %s old log files", purged)
+    except Exception:
+        logger.exception("Failed to purge old log files")
+
+    if int(cfg.retention_days) <= 0:
+        return
+
+    def _log_retention_job() -> None:
+        dbx = SessionLocal()
+        try:
+            cfg2 = get_logging_settings(dbx)
+        finally:
+            dbx.close()
+
+        try:
+            purged2 = purge_old_logs(retention_days=int(cfg2.retention_days))
+            if purged2:
+                logger.info("Purged %s old log files", purged2)
+        except Exception:
+            logger.exception("Error while purging old log files")
+
+    sched.add_job(
+        _log_retention_job,
+        "cron",
+        hour=0,
+        minute=15,
+        id="log_retention",
+        replace_existing=True,
+        timezone=settings.app.timezone,
+    )
+
+
+def _configure_past_due_notification_job(app: FastAPI, sched: BackgroundScheduler) -> None:
+    """Configure periodic scanning for tasks that have crossed into 'past due'."""
+
+    # Remove existing job first.
+    try:
+        sched.remove_job("past_due_notifications")
+    except Exception:
+        pass
+
+    def _past_due_job() -> None:
+        dbx = SessionLocal()
+        try:
+            now = datetime.utcnow().replace(tzinfo=None)
+            # Scan active tasks that are overdue.
+            tasks = (
+                dbx.query(Task)
+                .options(joinedload(Task.tags))
+                .filter(Task.status == TaskStatus.active)
+                .filter(Task.due_date_utc < now)
+                .all()
+            )
+            if not tasks:
+                return
+
+            for t in tasks:
+                try:
+                    due = getattr(t, "due_date_utc", None)
+                    due_key = due.isoformat() if due else ""
+                    event_key = f"past_due:{int(t.id)}:{due_key}"
+                    notify_task_event(dbx, task=t, event_type=EVENT_PAST_DUE, event_key=event_key)
+                except Exception:
+                    logger.exception("Failed to process past-due notification for task %s", getattr(t, "id", "?"))
+
+        except Exception:
+            logger.exception("Error while scanning for past-due notifications")
+        finally:
+            dbx.close()
+
+    # Run frequently; per-task de-duping prevents repeated notifications.
+    sched.add_job(
+        _past_due_job,
+        "interval",
+        minutes=5,
+        id="past_due_notifications",
+        replace_existing=True,
+    )
 
 
 def _configure_auto_backup_jobs(app: FastAPI, sched: BackgroundScheduler) -> None:
@@ -202,6 +422,16 @@ def on_startup() -> None:
     if report.applied_steps:
         logger.warning("Database schema upgraded to %s (%s)", report.current_db_version, ", ".join(report.applied_steps))
 
+    # Seed DB-backed settings from legacy settings.yml if missing.
+    db_seed = SessionLocal()
+    try:
+        seed_email_settings_from_legacy_yaml(db_seed, getattr(settings, "email", None))
+        seed_logging_settings_from_legacy_yaml(db_seed, getattr(settings, "logging", None))
+    except Exception:
+        logger.exception("Failed to seed DB-backed settings")
+    finally:
+        db_seed.close()
+
     # Ensure first-run admin.
     db = SessionLocal()
     try:
@@ -238,71 +468,23 @@ def on_startup() -> None:
         id="purge",
     )
 
-    def _reminder_job() -> None:
-        if not email_enabled():
-            return
-        dbj = SessionLocal()
-        try:
-            now = datetime.utcnow().replace(tzinfo=None)
+    # Email reminder jobs (configurable via Admin → Email).
+    try:
+        _configure_email_jobs(app, scheduler)
+    except Exception:
+        logger.exception("Failed to configure email jobs")
 
-            # Find overdue active tasks for users with email addresses.
-            q = (
-                dbj.query(Task)
-                .join(User, User.id == Task.user_id)
-                .filter(Task.status == TaskStatus.active)
-                .filter(Task.due_date_utc < now)
-                .filter(User.email.is_not(None))
-            )
+    # Notification scanning for past-due tasks.
+    try:
+        _configure_past_due_notification_job(app, scheduler)
+    except Exception:
+        logger.exception("Failed to configure past-due notification job")
 
-            tasks = q.all()
-            if not tasks:
-                return
-
-            base_url = _public_base_url()
-            dashboard_url = f"{base_url}/dashboard" if base_url else ""
-
-            grouped: dict[int, list[Task]] = {}
-            for t in tasks:
-                grouped.setdefault(int(t.user_id), []).append(t)
-
-            for user_id, items in grouped.items():
-                user = dbj.query(User).filter(User.id == user_id).first()
-                if not user or not user.email:
-                    continue
-
-                task_rows = []
-                for t in sorted(items, key=lambda x: x.due_date_utc):
-                    task_rows.append(
-                        {
-                            "name": t.name,
-                            "task_type": t.task_type,
-                            "due": format_dt_display(t.due_date_utc),
-                        }
-                    )
-
-                subject, body = build_overdue_reminder_email(
-                    username=user.username,
-                    tasks=task_rows,
-                    dashboard_url=dashboard_url or "(dashboard URL not configured)",
-                )
-
-                try:
-                    send_email(to_address=user.email, subject=subject, body_text=body)
-                except Exception:
-                    logger.exception("Failed to send overdue reminder to %s", user.email)
-
-        except Exception:
-            logger.exception("Error while sending overdue reminders")
-        finally:
-            dbj.close()
-
-    scheduler.add_job(
-        _reminder_job,
-        "interval",
-        minutes=int(settings.email.reminder_interval_minutes),
-        id="overdue_reminders",
-        replace_existing=True,
-    )
+    # Logging level + retention (configurable via Admin → Logs).
+    try:
+        _configure_logging_jobs(app, scheduler)
+    except Exception:
+        logger.exception("Failed to configure logging jobs")
 
     # Automated backups (configurable via Admin → Database).
     # Defaults preserve legacy behavior (daily at midnight; no retention purge).
@@ -314,6 +496,8 @@ def on_startup() -> None:
     # Make scheduler + configure hook accessible from request handlers.
     app.state.scheduler = scheduler
     app.state.configure_auto_backup_jobs = lambda: _configure_auto_backup_jobs(app, scheduler)
+    app.state.configure_email_jobs = lambda: _configure_email_jobs(app, scheduler)
+    app.state.configure_logging_jobs = lambda: _configure_logging_jobs(app, scheduler)
     scheduler.start()
 
 

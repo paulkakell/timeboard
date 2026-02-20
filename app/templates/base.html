@@ -13,7 +13,7 @@
     <link rel="manifest" href="/static/site.webmanifest">
     {% block extra_head %}{% endblock %}
   </head>
-  <body>
+<body data-browser-notifications-enabled="{% if browser_notifications_enabled %}1{% else %}0{% endif %}">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
       <div class="container">
         <a class="navbar-brand d-flex align-items-center gap-2" href="/dashboard">
@@ -45,6 +45,9 @@
                   <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
                   <ul class="dropdown-menu">
                     <li><a class="dropdown-item" href="/admin/users">Users</a></li>
+                    <li><a class="dropdown-item" href="/admin/email">Email</a></li>
+                    <li><a class="dropdown-item" href="/admin/notifications">Notifications</a></li>
+                    <li><a class="dropdown-item" href="/admin/logs">Logs</a></li>
                     <li><a class="dropdown-item" href="/admin/database">Database</a></li>
                   </ul>
                 </li>
@@ -58,6 +61,7 @@
             <li class="nav-item"><a class="nav-link" href="/help">Help</a></li>
             {% if current_user %}
               <li class="nav-item"><a class="nav-link" href="/profile">Profile</a></li>
+              <li class="nav-item"><a class="nav-link" href="/profile/notifications">Notifications</a></li>
               <li class="nav-item"><a class="nav-link" href="/logout">Logout</a></li>
             {% endif %}
           </ul>

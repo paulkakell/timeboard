@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import secrets
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -30,6 +31,7 @@ from ..crud import (
     get_user_by_email,
     get_user_by_username,
     list_tasks,
+    list_tags_for_user,
     list_users,
     restore_task,
     soft_delete_task,
@@ -49,7 +51,38 @@ from ..db_admin import (
     validate_import_payload,
 )
 from ..emailer import build_password_reset_email, email_enabled, send_email
-from ..models import RecurrenceType, Task, TaskStatus, Theme, User
+from ..logging_setup import list_log_files
+from ..meta_settings import (
+    get_email_settings,
+    get_logging_settings,
+    get_wns_settings,
+    set_email_settings,
+    set_logging_settings,
+    set_wns_settings,
+)
+from ..models import (
+    NotificationEvent,
+    RecurrenceType,
+    Task,
+    TaskStatus,
+    Theme,
+    User,
+    UserNotificationChannel,
+)
+from ..notifications import (
+    CHANNEL_BROWSER,
+    CHANNEL_DISCORD,
+    CHANNEL_EMAIL,
+    CHANNEL_GENERIC_API,
+    CHANNEL_GOTIFY,
+    CHANNEL_NTFY,
+    CHANNEL_WEBHOOK,
+    CHANNEL_WNS,
+    get_user_channels,
+    get_user_notification_tag_ids,
+    set_user_notification_tag_ids,
+    upsert_user_channel,
+)
 from ..utils.humanize import humanize_timedelta, time_left_class, seconds_to_duration_str
 from ..utils.time_utils import iso_for_datetime_local_input, now_utc, to_local
 from ..version import APP_VERSION
@@ -132,6 +165,20 @@ def _template_context(request: Request, user: Optional[User], db: Session | None
             extra["nav_users"] = list_users(db)
         except Exception:
             extra["nav_users"] = []
+
+    # Browser notifications enabled (used by base template JS).
+    if user and "browser_notifications_enabled" not in extra and db is not None:
+        try:
+            enabled = (
+                db.query(UserNotificationChannel)
+                .filter(UserNotificationChannel.user_id == int(user.id))
+                .filter(UserNotificationChannel.channel_type == CHANNEL_BROWSER)
+                .filter(UserNotificationChannel.enabled.is_(True))
+                .first()
+            )
+            extra["browser_notifications_enabled"] = bool(enabled)
+        except Exception:
+            extra["browser_notifications_enabled"] = False
 
     return {
         "request": request,
@@ -302,7 +349,7 @@ def forgot_email_get(request: Request, db: Session = Depends(get_db)):
             db=db,
             error=None,
             success=None,
-            email_enabled=email_enabled(),
+            email_enabled=email_enabled(db),
         ),
     )
 
@@ -313,7 +360,7 @@ def forgot_email_post(
     identifier: str = Form(...),
     db: Session = Depends(get_db),
 ):
-    if not email_enabled():
+    if not email_enabled(db):
         return templates.TemplateResponse(
             "forgot_email.html",
             _template_context(
@@ -334,14 +381,15 @@ def forgot_email_post(
 
     if u and u.email:
         token = secrets.token_urlsafe(32)
-        expires = datetime.utcnow().replace(tzinfo=None) + timedelta(minutes=int(settings.email.reset_token_minutes))
+        cfg = get_email_settings(db)
+        expires = datetime.utcnow().replace(tzinfo=None) + timedelta(minutes=int(cfg.reset_token_minutes))
         create_password_reset_token(db, user=u, token=token, expires_at_utc=expires)
 
         reset_url = f"{_base_url_for_email(request)}/reset-password?token={token}"
         subject, body = build_password_reset_email(username=u.username, reset_url=reset_url)
 
         try:
-            send_email(to_address=u.email, subject=subject, body_text=body)
+            send_email(to_address=u.email, subject=subject, body_text=body, db=db)
         except Exception:
             logger.exception("Failed to send password reset email")
             # Intentionally do not reveal SMTP errors to the end-user.
@@ -1117,6 +1165,307 @@ def profile_post(
         )
 
 
+@router.get("/profile/notifications", response_class=HTMLResponse)
+def profile_notifications_get(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+
+    tags = list_tags_for_user(db, user=user)
+    subscribed_ids = get_user_notification_tag_ids(db, user_id=int(user.id))
+    channels = get_user_channels(db, user_id=int(user.id))
+
+    def _chan(ctype: str) -> dict:
+        row = channels.get(ctype)
+        cfg = {}
+        if row and row.config_json:
+            try:
+                cfg = json.loads(row.config_json)
+            except Exception:
+                cfg = {}
+        if ctype == CHANNEL_GENERIC_API:
+            try:
+                if isinstance(cfg, dict) and isinstance(cfg.get("headers"), dict):
+                    cfg["headers"] = json.dumps(cfg.get("headers"), indent=2)
+            except Exception:
+                pass
+        return {"enabled": bool(row.enabled) if row else False, "config": cfg}
+
+    channel_state = {
+        CHANNEL_BROWSER: _chan(CHANNEL_BROWSER),
+        CHANNEL_EMAIL: _chan(CHANNEL_EMAIL),
+        CHANNEL_GOTIFY: _chan(CHANNEL_GOTIFY),
+        CHANNEL_NTFY: _chan(CHANNEL_NTFY),
+        CHANNEL_DISCORD: _chan(CHANNEL_DISCORD),
+        CHANNEL_WEBHOOK: _chan(CHANNEL_WEBHOOK),
+        CHANNEL_GENERIC_API: _chan(CHANNEL_GENERIC_API),
+        CHANNEL_WNS: _chan(CHANNEL_WNS),
+    }
+
+    wns_admin = get_wns_settings(db)
+
+    return templates.TemplateResponse(
+        "profile_notifications.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=None,
+            success=None,
+            available_tags=tags,
+            subscribed_tag_ids=subscribed_ids,
+            channels=channel_state,
+            wns_admin_enabled=bool(wns_admin.enabled),
+        ),
+    )
+
+
+@router.post("/profile/notifications", response_class=HTMLResponse)
+async def profile_notifications_post(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+
+    form = await request.form()
+
+    # Tag subscriptions.
+    try:
+        tag_ids = [int(x) for x in form.getlist("tag_ids")]
+    except Exception:
+        tag_ids = []
+    set_user_notification_tag_ids(db, user_id=int(user.id), tag_ids=tag_ids)
+
+    # Load existing configs to preserve secrets when left blank.
+    existing = get_user_channels(db, user_id=int(user.id))
+
+    def _existing_cfg(ctype: str) -> dict:
+        row = existing.get(ctype)
+        if not row or not row.config_json:
+            return {}
+        try:
+            v = json.loads(row.config_json)
+            return v if isinstance(v, dict) else {}
+        except Exception:
+            return {}
+
+    # Channel toggles.
+    browser_enabled = form.get("browser_enabled") == "on"
+    email_chan_enabled = form.get("email_notifications_enabled") == "on"
+
+    gotify_enabled = form.get("gotify_enabled") == "on"
+    ntfy_enabled = form.get("ntfy_enabled") == "on"
+    discord_enabled = form.get("discord_enabled") == "on"
+    webhook_enabled = form.get("webhook_enabled") == "on"
+    generic_api_enabled = form.get("generic_api_enabled") == "on"
+    wns_enabled = form.get("wns_enabled") == "on"
+
+    # Browser + Email have no config.
+    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_BROWSER, enabled=browser_enabled, config={})
+    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_EMAIL, enabled=email_chan_enabled, config={})
+
+    # Gotify
+    gotify_cfg = _existing_cfg(CHANNEL_GOTIFY)
+    gotify_base_url = str(form.get("gotify_base_url") or "").strip()
+    gotify_token = str(form.get("gotify_token") or "")
+    gotify_priority = str(form.get("gotify_priority") or gotify_cfg.get("priority") or "5").strip()
+    if gotify_base_url:
+        gotify_cfg["base_url"] = gotify_base_url
+    if gotify_token.strip():
+        gotify_cfg["token"] = gotify_token.strip()
+    gotify_cfg["priority"] = gotify_priority
+    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_GOTIFY, enabled=gotify_enabled, config=gotify_cfg)
+
+    # ntfy
+    ntfy_cfg = _existing_cfg(CHANNEL_NTFY)
+    ntfy_server_url = str(form.get("ntfy_server_url") or "").strip()
+    ntfy_topic = str(form.get("ntfy_topic") or "").strip()
+    ntfy_token = str(form.get("ntfy_token") or "")
+    ntfy_priority = str(form.get("ntfy_priority") or ntfy_cfg.get("priority") or "").strip()
+    if ntfy_server_url:
+        ntfy_cfg["server_url"] = ntfy_server_url
+    if ntfy_topic:
+        ntfy_cfg["topic"] = ntfy_topic
+    if ntfy_token.strip():
+        ntfy_cfg["token"] = ntfy_token.strip()
+    if ntfy_priority:
+        ntfy_cfg["priority"] = ntfy_priority
+    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_NTFY, enabled=ntfy_enabled, config=ntfy_cfg)
+
+    # Discord
+    discord_cfg = _existing_cfg(CHANNEL_DISCORD)
+    discord_webhook_url = str(form.get("discord_webhook_url") or "")
+    if discord_webhook_url.strip():
+        discord_cfg["webhook_url"] = discord_webhook_url.strip()
+    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_DISCORD, enabled=discord_enabled, config=discord_cfg)
+
+    # Generic webhook
+    webhook_cfg = _existing_cfg(CHANNEL_WEBHOOK)
+    webhook_url = str(form.get("webhook_url") or "").strip()
+    webhook_secret = str(form.get("webhook_secret") or "")
+    if webhook_url:
+        webhook_cfg["url"] = webhook_url
+    if webhook_secret.strip():
+        webhook_cfg["secret"] = webhook_secret.strip()
+    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_WEBHOOK, enabled=webhook_enabled, config=webhook_cfg)
+
+    # Generic API
+    api_cfg = _existing_cfg(CHANNEL_GENERIC_API)
+    api_url = str(form.get("generic_api_url") or "").strip()
+    api_method = str(form.get("generic_api_method") or api_cfg.get("method") or "POST").strip().upper()
+    api_token = str(form.get("generic_api_token") or "")
+    api_headers_raw = str(form.get("generic_api_headers") or "").strip()
+    if api_url:
+        api_cfg["url"] = api_url
+    api_cfg["method"] = api_method
+    if api_token.strip():
+        api_cfg["token"] = api_token.strip()
+    if api_headers_raw:
+        try:
+            hdrs = json.loads(api_headers_raw)
+            if isinstance(hdrs, dict):
+                api_cfg["headers"] = hdrs
+        except Exception:
+            # ignore invalid
+            pass
+    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_GENERIC_API, enabled=generic_api_enabled, config=api_cfg)
+
+    # WNS
+    wns_cfg = _existing_cfg(CHANNEL_WNS)
+    channel_uri = str(form.get("wns_channel_uri") or "")
+    if channel_uri.strip():
+        wns_cfg["channel_uri"] = channel_uri.strip()
+    upsert_user_channel(db, user_id=int(user.id), channel_type=CHANNEL_WNS, enabled=wns_enabled, config=wns_cfg)
+
+    tags = list_tags_for_user(db, user=user)
+    subscribed_ids = get_user_notification_tag_ids(db, user_id=int(user.id))
+    channels = get_user_channels(db, user_id=int(user.id))
+
+    def _chan(ctype: str) -> dict:
+        row = channels.get(ctype)
+        cfg = {}
+        if row and row.config_json:
+            try:
+                cfg = json.loads(row.config_json)
+            except Exception:
+                cfg = {}
+        if ctype == CHANNEL_GENERIC_API:
+            try:
+                if isinstance(cfg, dict) and isinstance(cfg.get("headers"), dict):
+                    cfg["headers"] = json.dumps(cfg.get("headers"), indent=2)
+            except Exception:
+                pass
+        return {"enabled": bool(row.enabled) if row else False, "config": cfg}
+
+    channel_state = {
+        CHANNEL_BROWSER: _chan(CHANNEL_BROWSER),
+        CHANNEL_EMAIL: _chan(CHANNEL_EMAIL),
+        CHANNEL_GOTIFY: _chan(CHANNEL_GOTIFY),
+        CHANNEL_NTFY: _chan(CHANNEL_NTFY),
+        CHANNEL_DISCORD: _chan(CHANNEL_DISCORD),
+        CHANNEL_WEBHOOK: _chan(CHANNEL_WEBHOOK),
+        CHANNEL_GENERIC_API: _chan(CHANNEL_GENERIC_API),
+        CHANNEL_WNS: _chan(CHANNEL_WNS),
+    }
+
+    wns_admin = get_wns_settings(db)
+
+    return templates.TemplateResponse(
+        "profile_notifications.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=None,
+            success="Saved",
+            available_tags=tags,
+            subscribed_tag_ids=subscribed_ids,
+            channels=channel_state,
+            wns_admin_enabled=bool(wns_admin.enabled),
+        ),
+    )
+
+
+@router.get("/notifications/stream")
+async def notifications_stream(request: Request):
+    """Server-Sent Events stream for browser notifications.
+
+    This is intentionally session-cookie based (UI), not JWT.
+    """
+    uid = request.session.get("user_id")
+    try:
+        user_id = int(uid)
+    except Exception:
+        return JSONResponse({"error": "not_authenticated"}, status_code=401)
+
+    # Verify browser notifications are enabled for this user.
+    last_id = 0
+    db0 = SessionLocal()
+    try:
+        enabled = (
+            db0.query(UserNotificationChannel)
+            .filter(UserNotificationChannel.user_id == int(user_id))
+            .filter(UserNotificationChannel.channel_type == CHANNEL_BROWSER)
+            .filter(UserNotificationChannel.enabled.is_(True))
+            .first()
+        )
+        if not enabled:
+            return JSONResponse({"error": "browser_notifications_disabled"}, status_code=404)
+
+        # If the client didn't provide Last-Event-ID, start from the current max
+        # so we don't spam old notifications.
+        hdr_last = request.headers.get("last-event-id")
+        if hdr_last:
+            try:
+                last_id = int(hdr_last)
+            except Exception:
+                last_id = 0
+        else:
+            max_id = db0.query(func.max(NotificationEvent.id)).filter(NotificationEvent.user_id == int(user_id)).scalar()
+            last_id = int(max_id or 0)
+    finally:
+        db0.close()
+
+    async def event_generator():
+        nonlocal last_id
+        while True:
+            if await request.is_disconnected():
+                break
+
+            dbx = SessionLocal()
+            try:
+                rows = (
+                    dbx.query(NotificationEvent)
+                    .filter(NotificationEvent.user_id == int(user_id))
+                    .filter(NotificationEvent.id > int(last_id))
+                    .order_by(NotificationEvent.id.asc())
+                    .limit(25)
+                    .all()
+                )
+
+                for ev in rows:
+                    last_id = max(int(last_id), int(ev.id))
+                    payload = {
+                        "id": int(ev.id),
+                        "event_type": ev.event_type,
+                        "title": ev.title,
+                        "message": ev.message,
+                        "task_id": ev.task_id,
+                        "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                    }
+                    data = json.dumps(payload)
+                    yield f"id: {payload['id']}\nevent: notification\ndata: {data}\n\n"
+            finally:
+                dbx.close()
+
+            await asyncio.sleep(3)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/admin/users", response_class=HTMLResponse)
 def admin_users_get(request: Request, db: Session = Depends(get_db)):
     user = _get_current_user(request, db)
@@ -1625,6 +1974,308 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
         pass
 
     return _redirect("/login?success=import")
+
+
+@router.get("/admin/email", response_class=HTMLResponse)
+def admin_email_get(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    cfg = get_email_settings(db)
+    return templates.TemplateResponse(
+        "admin_email.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=None,
+            success=None,
+            email_cfg=cfg,
+        ),
+    )
+
+
+@router.post("/admin/email", response_class=HTMLResponse)
+async def admin_email_post(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    form = await request.form()
+    enabled = form.get("enabled") == "on"
+    smtp_host = str(form.get("smtp_host") or "")
+    smtp_port = int(form.get("smtp_port") or 587)
+    smtp_username = str(form.get("smtp_username") or "")
+    smtp_password = str(form.get("smtp_password") or "")
+    smtp_from = str(form.get("smtp_from") or "")
+    use_tls = form.get("use_tls") == "on"
+    reminder_interval_minutes = int(form.get("reminder_interval_minutes") or 60)
+    reset_token_minutes = int(form.get("reset_token_minutes") or 60)
+
+    clear_password = form.get("clear_smtp_password") == "on"
+    keep_existing_password = (not clear_password) and (smtp_password.strip() == "")
+    if clear_password:
+        smtp_password = ""
+
+    try:
+        cfg = set_email_settings(
+            db,
+            enabled=enabled,
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+            smtp_username=smtp_username,
+            smtp_password=smtp_password,
+            smtp_from=smtp_from,
+            use_tls=use_tls,
+            reminder_interval_minutes=reminder_interval_minutes,
+            reset_token_minutes=reset_token_minutes,
+            keep_existing_password=keep_existing_password,
+        )
+        # Reconfigure reminder jobs immediately.
+        cfg_fn = getattr(request.app.state, "configure_email_jobs", None)
+        if callable(cfg_fn):
+            try:
+                cfg_fn()
+            except Exception:
+                logger.exception("Failed to reconfigure email jobs")
+
+        return templates.TemplateResponse(
+            "admin_email.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=None,
+                success="Saved",
+                email_cfg=cfg,
+            ),
+        )
+    except Exception as e:
+        cfg = get_email_settings(db)
+        return templates.TemplateResponse(
+            "admin_email.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=str(e),
+                success=None,
+                email_cfg=cfg,
+            ),
+            status_code=400,
+        )
+
+
+@router.get("/admin/notifications", response_class=HTMLResponse)
+def admin_notifications_get(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    wns_cfg = get_wns_settings(db)
+    return templates.TemplateResponse(
+        "admin_notifications.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=None,
+            success=None,
+            wns_cfg=wns_cfg,
+        ),
+    )
+
+
+@router.post("/admin/notifications", response_class=HTMLResponse)
+async def admin_notifications_post(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    form = await request.form()
+    enabled = form.get("wns_enabled") == "on"
+    package_sid = str(form.get("wns_package_sid") or "")
+    client_secret = str(form.get("wns_client_secret") or "")
+    clear_secret = form.get("clear_wns_client_secret") == "on"
+    keep_existing_secret = (not clear_secret) and (client_secret.strip() == "")
+    if clear_secret:
+        client_secret = ""
+
+    try:
+        wns_cfg = set_wns_settings(
+            db,
+            enabled=enabled,
+            package_sid=package_sid,
+            client_secret=client_secret,
+            keep_existing_secret=keep_existing_secret,
+        )
+        return templates.TemplateResponse(
+            "admin_notifications.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=None,
+                success="Saved",
+                wns_cfg=wns_cfg,
+            ),
+        )
+    except Exception as e:
+        wns_cfg = get_wns_settings(db)
+        return templates.TemplateResponse(
+            "admin_notifications.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=str(e),
+                success=None,
+                wns_cfg=wns_cfg,
+            ),
+            status_code=400,
+        )
+
+
+def _tail_file(path: Path, max_lines: int = 2000) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        if len(lines) > max_lines:
+            lines = lines[-max_lines:]
+        return "".join(lines)
+    except Exception:
+        return ""
+
+
+@router.get("/admin/logs", response_class=HTMLResponse)
+def admin_logs_get(request: Request, file: str | None = None, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    cfg = get_logging_settings(db)
+    files = []
+    for p in list_log_files():
+        try:
+            st = p.stat()
+            files.append(
+                {
+                    "name": p.name,
+                    "size_bytes": int(st.st_size),
+                    "modified": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
+        except Exception:
+            continue
+
+    selected = None
+    content = None
+    if file:
+        safe_name = Path(file).name
+        candidate = Path("/data/logs") / safe_name
+        try:
+            if candidate.exists() and candidate.is_file() and str(candidate.resolve()).startswith(str(Path("/data/logs").resolve())):
+                selected = safe_name
+                content = _tail_file(candidate, max_lines=4000)
+        except Exception:
+            selected = None
+            content = None
+
+    return templates.TemplateResponse(
+        "admin_logs.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=None,
+            success=None,
+            logging_cfg=cfg,
+            log_files=files,
+            selected_file=selected,
+            selected_content=content,
+        ),
+    )
+
+
+@router.post("/admin/logs", response_class=HTMLResponse)
+async def admin_logs_post(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user or not user.is_admin:
+        return _redirect("/dashboard")
+
+    form = await request.form()
+    level = str(form.get("level") or "INFO").strip().upper()
+    retention_days = int(form.get("retention_days") or 30)
+
+    try:
+        cfg = set_logging_settings(db, level=level, retention_days=retention_days)
+        cfg_fn = getattr(request.app.state, "configure_logging_jobs", None)
+        if callable(cfg_fn):
+            try:
+                cfg_fn()
+            except Exception:
+                logger.exception("Failed to reconfigure logging jobs")
+
+        files = []
+        for p in list_log_files():
+            try:
+                st = p.stat()
+                files.append(
+                    {
+                        "name": p.name,
+                        "size_bytes": int(st.st_size),
+                        "modified": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                )
+            except Exception:
+                continue
+
+        return templates.TemplateResponse(
+            "admin_logs.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=None,
+                success="Saved",
+                logging_cfg=cfg,
+                log_files=files,
+                selected_file=None,
+                selected_content=None,
+            ),
+        )
+    except Exception as e:
+        cfg = get_logging_settings(db)
+        files = []
+        for p in list_log_files():
+            try:
+                st = p.stat()
+                files.append(
+                    {
+                        "name": p.name,
+                        "size_bytes": int(st.st_size),
+                        "modified": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                )
+            except Exception:
+                continue
+
+        return templates.TemplateResponse(
+            "admin_logs.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error=str(e),
+                success=None,
+                logging_cfg=cfg,
+                log_files=files,
+                selected_file=None,
+                selected_content=None,
+            ),
+            status_code=400,
+        )
 
 
 @router.get("/help", response_class=HTMLResponse)

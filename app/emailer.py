@@ -5,31 +5,43 @@ import smtplib
 from email.message import EmailMessage
 from typing import Iterable, Optional
 
-from .config import get_settings
+from sqlalchemy.orm import Session
+
+from .db import SessionLocal
+from .meta_settings import EmailConfig, get_email_settings
 
 
 logger = logging.getLogger("timeboard.email")
 
 
-def email_enabled() -> bool:
-    s = get_settings()
-    if not s.email.enabled:
+def _load_email_config(db: Session | None = None) -> EmailConfig:
+    if db is not None:
+        return get_email_settings(db)
+    s = SessionLocal()
+    try:
+        return get_email_settings(s)
+    finally:
+        s.close()
+
+
+def email_enabled(db: Session | None = None) -> bool:
+    cfg = _load_email_config(db)
+    if not bool(cfg.enabled):
         return False
-    if not s.email.smtp_host:
+    if not str(cfg.smtp_host or "").strip():
         return False
     return True
 
 
-def _smtp_connect():
-    s = get_settings()
-    server = smtplib.SMTP(s.email.smtp_host, int(s.email.smtp_port), timeout=20)
+def _smtp_connect(cfg: EmailConfig):
+    server = smtplib.SMTP(str(cfg.smtp_host), int(cfg.smtp_port), timeout=20)
     try:
         server.ehlo()
-        if s.email.use_tls:
+        if bool(cfg.use_tls):
             server.starttls()
             server.ehlo()
-        if s.email.smtp_username:
-            server.login(s.email.smtp_username, s.email.smtp_password)
+        if cfg.smtp_username:
+            server.login(cfg.smtp_username, cfg.smtp_password)
         return server
     except Exception:
         try:
@@ -39,24 +51,31 @@ def _smtp_connect():
         raise
 
 
-def send_email(*, to_address: str, subject: str, body_text: str, body_html: Optional[str] = None) -> None:
+def send_email(
+    *,
+    to_address: str,
+    subject: str,
+    body_text: str,
+    body_html: Optional[str] = None,
+    db: Session | None = None,
+) -> None:
     """Send an email using SMTP settings.
 
     Raises on failure. Callers should catch exceptions and log.
     """
-    s = get_settings()
-    if not email_enabled():
+    cfg = _load_email_config(db)
+    if not email_enabled(db):
         raise RuntimeError("Email is not configured (email.enabled=false or smtp_host missing)")
 
     msg = EmailMessage()
-    msg["From"] = s.email.smtp_from
+    msg["From"] = cfg.smtp_from
     msg["To"] = to_address
     msg["Subject"] = subject
     msg.set_content(body_text)
     if body_html:
         msg.add_alternative(body_html, subtype="html")
 
-    server = _smtp_connect()
+    server = _smtp_connect(cfg)
     try:
         server.send_message(msg)
     finally:

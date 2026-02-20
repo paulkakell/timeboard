@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from .auth import hash_password, verify_password
 from .config import get_settings
 from .models import PasswordResetToken, RecurrenceType, Tag, Task, TaskStatus, Theme, User
+from .notifications import EVENT_ARCHIVED, EVENT_COMPLETED, EVENT_CREATED, EVENT_UPDATED, notify_task_event
 from .recurrence import (
     RecurrenceError,
     compute_next_due_utc,
@@ -17,6 +19,9 @@ from .recurrence import (
     parse_fixed_calendar_rule,
     parse_times_csv,
 )
+
+
+logger = logging.getLogger("timeboard.crud")
 from .utils.time_utils import from_local_to_utc_naive
 
 
@@ -437,6 +442,13 @@ def create_task(
     db.add(task)
     db.commit()
     db.refresh(task)
+
+    # Task notifications (tag-based) are best-effort; failures should not block
+    # task creation.
+    try:
+        notify_task_event(db, task=task, event_type=EVENT_CREATED)
+    except Exception:
+        logger.exception("Failed to send task-created notification")
     return task
 
 
@@ -610,6 +622,13 @@ def update_task(
     if not current_user.is_admin and task.user_id != current_user.id:
         raise PermissionError("Not allowed")
 
+    # Capture old tags so updates that remove a subscribed tag can still trigger
+    # a notification.
+    try:
+        old_tag_ids = {int(t.id) for t in (task.tags or [])}
+    except Exception:
+        old_tag_ids = set()
+
     if name is not None:
         task.name = name
     if task_type is not None:
@@ -637,6 +656,17 @@ def update_task(
     db.add(task)
     db.commit()
     db.refresh(task)
+
+    try:
+        new_tag_ids = {int(t.id) for t in (task.tags or [])}
+    except Exception:
+        new_tag_ids = set()
+    relevant = set(old_tag_ids) | set(new_tag_ids)
+
+    try:
+        notify_task_event(db, task=task, event_type=EVENT_UPDATED, relevant_tag_ids=relevant)
+    except Exception:
+        logger.exception("Failed to send task-updated notification")
     return task
 
 
@@ -650,6 +680,11 @@ def soft_delete_task(db: Session, *, task: Task, current_user: User, when_utc: d
     db.add(task)
     db.commit()
     db.refresh(task)
+
+    try:
+        notify_task_event(db, task=task, event_type=EVENT_ARCHIVED)
+    except Exception:
+        logger.exception("Failed to send task-archived notification")
     return task
 
 
@@ -708,6 +743,17 @@ def complete_task(
     db.refresh(task)
     if spawned:
         db.refresh(spawned)
+
+    try:
+        notify_task_event(db, task=task, event_type=EVENT_COMPLETED)
+    except Exception:
+        logger.exception("Failed to send task-completed notification")
+
+    if spawned is not None:
+        try:
+            notify_task_event(db, task=spawned, event_type=EVENT_CREATED)
+        except Exception:
+            logger.exception("Failed to send recurrence task-created notification")
 
     return task, spawned
 
