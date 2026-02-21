@@ -2,7 +2,7 @@
 
 A lightweight, dockerized task board that supports recurrence intervals shorter than a day.
 
-Current version: **00.06.00**
+Current version: **00.07.00**
 
 Repository:
 - https://github.com/paulkakell/timeboard
@@ -58,6 +58,9 @@ On first run, Timeboard creates an `admin` account and prints the password in th
 
 ```bash
 docker logs -f timeboard
+
+On first run (fresh database file), Timeboard also seeds a small set of demo tasks/tags under the initial admin account.
+You can remove all seeded/user data via **Admin → Database → Purge All**.
 ```
 
 ## Configuration

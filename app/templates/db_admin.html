@@ -95,6 +95,32 @@
   </div>
 </div>
 
+<div class="row g-3 mt-1">
+  <div class="col-12">
+    <div class="card border-danger">
+      <div class="card-header text-danger">Danger Zone</div>
+      <div class="card-body">
+        <p class="small text-muted mb-2">
+          Purge permanently deletes all tasks, tags, and notification-related data.
+          User accounts and admin settings are preserved so you can continue to sign in.
+        </p>
+
+        <form method="post" action="/admin/database/purge-all">
+          <div class="row g-2 align-items-end">
+            <div class="col-12 col-md-6">
+              <label class="form-label">Type <code>PURGE</code> to confirm</label>
+              <input class="form-control" name="confirm" placeholder="PURGE" required>
+            </div>
+            <div class="col-12 col-md-6 d-grid">
+              <button class="btn btn-danger" type="submit" onclick="return confirm('This will permanently delete tasks/tags/notifications data from the database. Continue?');">Purge All</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="mt-3">
   <a class="btn btn-outline-secondary" href="/admin/users">Back to Users</a>
 </div>

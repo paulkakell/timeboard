@@ -541,10 +541,19 @@ def _send_gotify(*, config: dict, title: str, message: str) -> None:
     if priority > 10:
         priority = 10
 
-    url = f"{base_url}/message?token={parse.quote(token)}"
+    # Prefer auth via header instead of query string so reverse proxies/WAFs
+    # that strip or block sensitive query params do not break delivery.
+    url = f"{base_url}/message"
     payload = {"title": title, "message": message, "priority": priority}
     data = json.dumps(payload).encode("utf-8")
-    _http_request(url=url, headers={"Content-Type": "application/json"}, data=data)
+    _http_request(
+        url=url,
+        headers={
+            "Content-Type": "application/json",
+            "X-Gotify-Key": token,
+        },
+        data=data,
+    )
 
 
 def _send_ntfy(*, config: dict, title: str, message: str, click_url: str | None = None) -> None:

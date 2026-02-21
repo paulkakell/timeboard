@@ -411,6 +411,7 @@ def create_task(
     recurrence_interval: Optional[str] = None,
     recurrence_times: Optional[str] = None,
     tags: Optional[Iterable[str]] = None,
+    send_notifications: bool = True,
 ) -> Task:
     # Allow tasks with no due date. If omitted, use creation time.
     if due_date is None:
@@ -443,12 +444,13 @@ def create_task(
     db.commit()
     db.refresh(task)
 
-    # Task notifications (tag-based) are best-effort; failures should not block
-    # task creation.
-    try:
-        notify_task_event(db, task=task, event_type=EVENT_CREATED)
-    except Exception:
-        logger.exception("Failed to send task-created notification")
+    if send_notifications:
+        # Task notifications (tag-based) are best-effort; failures should not block
+        # task creation.
+        try:
+            notify_task_event(db, task=task, event_type=EVENT_CREATED)
+        except Exception:
+            logger.exception("Failed to send task-created notification")
     return task
 
 

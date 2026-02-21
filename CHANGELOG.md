@@ -1,6 +1,17 @@
 # Changelog
 
 
+## 00.07.00
+
+- Additive: First-run installs now seed a small set of demo tasks/tags for the initial admin account (only when the SQLite DB file did not exist before startup).
+- Additive: Admin → Database now includes a "Purge All" action to permanently delete tasks, tags, and notification-related data (user accounts + admin settings are preserved). A pre-purge JSON backup is written to `/data/backups`.
+- Fix: Gotify notifications now authenticate using the `X-Gotify-Key` header instead of `?token=...` query params (improves compatibility with reverse proxies/WAFs and avoids leaking tokens in URLs).
+
+Compatibility: Backward compatible.
+
+Refs: Issue N/A, Commit N/A
+
+
 ## 00.06.00
 
 - Additive: Email can now be delivered via SendGrid API (v3) as an alternative to SMTP. Configurable in Admin → Email and via the Admin email settings API.

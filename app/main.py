@@ -16,6 +16,7 @@ from .config import get_settings
 from .crud import create_user, purge_archived_tasks
 from .db_admin import backup_database_json, get_auto_backup_settings, purge_backup_files
 from .db import Base, SessionLocal, engine
+from .demo_data import seed_demo_data
 from .emailer import build_overdue_reminder_email, email_enabled, send_email
 from .logging_setup import apply_log_level, purge_old_logs, setup_logging
 from .meta_settings import (
@@ -424,6 +425,16 @@ def _public_base_url() -> str:
 def on_startup() -> None:
     global scheduler
 
+    # Detect a fresh install before SQLAlchemy creates the SQLite DB file.
+    is_fresh_db_file = False
+    try:
+        if str(getattr(engine, "dialect", None).name or "").lower() == "sqlite":
+            db_file = getattr(getattr(engine, "url", None), "database", None)
+            if db_file and str(db_file) != ":memory:":
+                is_fresh_db_file = not Path(str(db_file)).exists()
+    except Exception:
+        is_fresh_db_file = False
+
     # Ensure DB tables exist.
     Base.metadata.create_all(bind=engine)
 
@@ -455,6 +466,17 @@ def on_startup() -> None:
             logger.warning("Password: %s", admin_password)
             logger.warning("Please log in and change this password.")
             logger.warning("============================================================")
+
+        # Seed demo tasks/tags for true first-run installs.
+        if is_fresh_db_file:
+            try:
+                admin_user = db.query(User).filter(User.username == "admin").first() or db.query(User).first()
+                if admin_user:
+                    result = seed_demo_data(db, owner=admin_user)
+                    if result.get("seeded"):
+                        logger.info("Seeded demo data (tasks_created=%s)", result.get("tasks_created"))
+            except Exception:
+                logger.exception("Failed to seed demo data")
     finally:
         db.close()
 

@@ -47,6 +47,7 @@ from ..db_admin import (
     export_db_json,
     get_auto_backup_settings,
     import_db_json,
+    purge_all_data,
     set_auto_backup_settings,
     validate_import_payload,
 )
@@ -2143,6 +2144,114 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
         pass
 
     return _redirect("/login?success=import")
+
+
+@router.post("/admin/database/purge-all", response_class=HTMLResponse)
+def admin_database_purge_all(
+    request: Request,
+    confirm: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+    if not user.is_admin:
+        return _redirect("/dashboard")
+
+    cfg = get_auto_backup_settings(db)
+    freq_options = [
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+        ("12h", "Every 12 hours"),
+        ("6h", "Every 6 hours"),
+        ("hourly", "Hourly"),
+        ("disabled", "Disabled"),
+    ]
+
+    backup_dir = Path("/data/backups")
+    backup_count = 0
+    latest_backup = None
+    try:
+        if backup_dir.exists() and backup_dir.is_dir():
+            files = [p for p in backup_dir.glob("*.json") if p.is_file() and not p.name.startswith(".")]
+            backup_count = len(files)
+            if files:
+                newest = max(files, key=lambda p: p.stat().st_mtime)
+                latest_backup = {
+                    "name": newest.name,
+                    "mtime_utc": datetime.utcfromtimestamp(newest.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                }
+    except Exception:
+        backup_count = 0
+        latest_backup = None
+
+    # Require explicit confirmation.
+    if (confirm or "").strip().upper() != "PURGE":
+        return templates.TemplateResponse(
+            "db_admin.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error="Confirmation required. Type PURGE to confirm.",
+                success=None,
+                auto_backup_frequency=str(cfg.get("frequency") or "daily"),
+                auto_backup_retention_days=int(cfg.get("retention_days") or 0),
+                auto_backup_frequency_options=freq_options,
+                backup_dir=str(backup_dir),
+                backup_count=backup_count,
+                latest_backup=latest_backup,
+            ),
+            status_code=400,
+        )
+
+    # Create a pre-purge backup for safety.
+    warnings: list[str] = []
+    try:
+        bdb = SessionLocal()
+        try:
+            backup_path = backup_database_json(bdb, prefix="PURGE")
+            warnings.append(f"Pre-purge backup created: {backup_path.name}")
+        finally:
+            bdb.close()
+    except Exception:
+        logger.exception("Failed to create pre-purge PURGE backup")
+
+    err: str | None = None
+    ok: str | None = None
+    try:
+        counts = purge_all_data(db, preserve_users=True, preserve_app_meta=True)
+        ok = (
+            "Purge complete. "
+            f"Deleted tasks={counts.get('tasks', 0)}, tags={counts.get('tags', 0)}, "
+            f"notification_events={counts.get('notification_events', 0)}, "
+            f"notification_services={counts.get('user_notification_services', 0)}."
+        )
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        err = str(e)
+
+    return templates.TemplateResponse(
+        "db_admin.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=err,
+            warnings=warnings,
+            success=ok,
+            auto_backup_frequency=str(cfg.get("frequency") or "daily"),
+            auto_backup_retention_days=int(cfg.get("retention_days") or 0),
+            auto_backup_frequency_options=freq_options,
+            backup_dir=str(backup_dir),
+            backup_count=backup_count,
+            latest_backup=latest_backup,
+        ),
+        status_code=200 if not err else 400,
+    )
 
 
 @router.get("/admin/email", response_class=HTMLResponse)
