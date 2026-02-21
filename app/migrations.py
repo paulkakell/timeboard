@@ -101,6 +101,13 @@ def ensure_db_schema(engine: Engine) -> MigrationReport:
             conn.execute(text("ALTER TABLE users ADD COLUMN ui_prefs_json TEXT"))
             applied.append("alter_table:users:add_column:ui_prefs_json")
 
+        # Add users.manager_id (nullable) for user hierarchy.
+        if _table_exists(conn, "users") and not _column_exists(conn, "users", "manager_id"):
+            conn.execute(text("ALTER TABLE users ADD COLUMN manager_id INTEGER NULL"))
+            applied.append("alter_table:users:add_column:manager_id")
+        if _table_exists(conn, "users"):
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_manager_id ON users(manager_id)"))
+
         # Ensure unique index for users.email (helps older DBs where constraint didn't exist).
         # NOTE: SQLite allows multiple NULLs in UNIQUE indexes, which is what we want.
         if _table_exists(conn, "users"):
@@ -241,6 +248,48 @@ def ensure_db_schema(engine: Engine) -> MigrationReport:
                 applied.append("alter_table:notification_events:add_column:delivered_at_utc")
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_delivery_status ON notification_events(delivery_status)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_delivered_at_utc ON notification_events(delivered_at_utc)"))
+
+            # In-app notifications: cleared_at_utc (added in v00.09.00).
+            if not _column_exists(conn, "notification_events", "cleared_at_utc"):
+                conn.execute(text("ALTER TABLE notification_events ADD COLUMN cleared_at_utc DATETIME NULL"))
+                applied.append("alter_table:notification_events:add_column:cleared_at_utc")
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ne_cleared_at_utc ON notification_events(cleared_at_utc)"))
+
+        # Task nesting + assignment attribution.
+        if _table_exists(conn, "tasks"):
+            if not _column_exists(conn, "tasks", "parent_task_id"):
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN parent_task_id INTEGER NULL"))
+                applied.append("alter_table:tasks:add_column:parent_task_id")
+            if not _column_exists(conn, "tasks", "assigned_by_user_id"):
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN assigned_by_user_id INTEGER NULL"))
+                applied.append("alter_table:tasks:add_column:assigned_by_user_id")
+
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_parent_task_id ON tasks(parent_task_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_assigned_by_user_id ON tasks(assigned_by_user_id)"))
+
+        # Task follows (manager follow notifications).
+        if not _table_exists(conn, "task_follows"):
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS task_follows ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  follower_user_id INTEGER NOT NULL,"
+                    "  task_id INTEGER NOT NULL,"
+                    "  created_at DATETIME NOT NULL,"
+                    "  FOREIGN KEY(follower_user_id) REFERENCES users(id) ON DELETE CASCADE,"
+                    "  FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE"
+                    ")"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_task_follows_follower_task "
+                    "ON task_follows(follower_user_id, task_id)"
+                )
+            )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_task_follows_follower_user_id ON task_follows(follower_user_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_task_follows_task_id ON task_follows(task_id)"))
+            applied.append("create_table:task_follows")
 
         # Set DB version to current app version (schema and app version are aligned for now).
         _set_meta(conn, "db_version", APP_VERSION)

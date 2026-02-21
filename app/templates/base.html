@@ -57,11 +57,38 @@
             {% endif %}
           </ul>
 
+          {% if current_user %}
+          <form class="d-flex me-3" role="search" action="/dashboard" method="get">
+            <input class="form-control form-control-sm" type="search" name="q" placeholder="Search tasks" value="{{ nav_search_q or '' }}">
+          </form>
+          {% endif %}
+
           <ul class="navbar-nav ms-auto">
             <li class="nav-item"><a class="nav-link" href="/help">Help</a></li>
             {% if current_user %}
+              <li class="nav-item dropdown">
+                <a class="nav-link position-relative" href="#" id="tbNotifDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Notifications">
+                  <span aria-hidden="true">🔔</span>
+                  <span
+                    id="tbNotifBadge"
+                    class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"
+                    style="{% if in_app_unread_count and in_app_unread_count > 0 %}display:inline-block;{% else %}display:none;{% endif %}"
+                  >{{ in_app_unread_count or 0 }}</span>
+                </a>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="tbNotifDropdown" style="min-width: 320px;">
+                  <li class="dropdown-header d-flex justify-content-between align-items-center">
+                    <span>Notifications</span>
+                    <a class="small" href="/profile/notifications">Settings</a>
+                  </li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li>
+                    <div id="tbNotifList" class="px-2" style="max-height: 360px; overflow:auto;"></div>
+                  </li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li><a class="dropdown-item text-center" href="/notifications">View all</a></li>
+                </ul>
+              </li>
               <li class="nav-item"><a class="nav-link" href="/profile">Profile</a></li>
-              <li class="nav-item"><a class="nav-link" href="/profile/notifications">Notifications</a></li>
               <li class="nav-item"><a class="nav-link" href="/logout">Logout</a></li>
             {% endif %}
           </ul>

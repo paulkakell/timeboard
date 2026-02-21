@@ -24,6 +24,15 @@
             <label class="form-label">Email (required for non-admin)</label>
             <input class="form-control" type="email" name="email" placeholder="name@example.com">
           </div>
+	          <div class="col-12">
+	            <label class="form-label">Manager (optional)</label>
+	            <select class="form-select" name="manager_id">
+	              <option value="">None</option>
+	              {% for mu in manager_options %}
+	                <option value="{{ mu.id }}">{{ mu.username }}</option>
+	              {% endfor %}
+	            </select>
+	          </div>
           <div class="col-12">
             <label class="form-label">Password</label>
             <input class="form-control" type="password" name="password" required>
@@ -52,6 +61,7 @@
               <tr>
                 <th>Username</th>
                 <th>Email</th>
+	                <th>Manager</th>
                 <th>Role</th>
                 <th class="text-end">Actions</th>
               </tr>
@@ -61,6 +71,7 @@
                 <tr>
                   <td>{{ u.username }}</td>
                   <td class="small">{{ u.email or '' }}</td>
+	                  <td class="small">{% if u.manager %}{{ u.manager.username }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                   <td>{% if u.is_admin %}Admin{% else %}User{% endif %}</td>
                   <td class="text-end">
                     <a class="btn btn-sm btn-outline-secondary" href="/admin/users/{{ u.id }}/edit">Edit</a>
@@ -72,9 +83,17 @@
                           <button class="btn btn-sm btn-outline-secondary" type="submit">Make Admin</button>
                         {% endif %}
                       </form>
-                      <form method="post" action="/admin/users/{{ u.id }}/delete" class="d-inline" onsubmit="return confirm('Delete user {{ u.username }} and all associated tasks?');">
-                        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
-                      </form>
+	                      <form method="post" action="/admin/users/{{ u.id }}/delete" class="d-inline" onsubmit="return confirm('Delete user {{ u.username }}?');">
+	                        <select class="form-select form-select-sm d-inline w-auto" name="reassign_completed_to_user_id" title="Completed tasks">
+	                          <option value="">Delete completed tasks</option>
+	                          {% for mu in manager_options %}
+	                            {% if mu.id != u.id %}
+	                              <option value="{{ mu.id }}">Reassign completed to {{ mu.username }}</option>
+	                            {% endif %}
+	                          {% endfor %}
+	                        </select>
+	                        <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+	                      </form>
                     {% else %}
                       <span class="text-muted small">(current)</span>
                     {% endif %}

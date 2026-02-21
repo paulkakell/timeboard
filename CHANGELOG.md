@@ -1,6 +1,28 @@
 # Changelog
 
 
+## 00.09.00
+
+- Additive: Global task search (navbar) that searches across task fields and tags.
+- Additive: Task cloning, including full subtask trees.
+- Additive: Nested subtasks (unlimited depth) via parent/child tasks.
+  - Recurrent parent tasks rebuild their full child task tree on recurrence.
+  - Safeguard: completing/deleting a parent task with open subtasks prompts to cascade-close or cancel.
+- Additive: In-app notifications with navbar bell + unread badge.
+  - Viewing notifications clears the "new" badge state.
+  - Uncleared notifications persist indefinitely; cleared notifications are purged using the same retention policy as archived tasks.
+- Additive: Hierarchical users (manager/subordinate).
+  - Admin can set each user's manager.
+  - Managers can assign tasks to subordinates.
+  - Managers can follow subordinate tasks to receive in-app notifications on update/complete/delete.
+  - Manager dashboard can optionally include tasks they assigned to subordinates.
+- Additive: Admin user deletion supports optional reassignment of completed tasks.
+
+Compatibility: Backward compatible (DB migration is additive: new nullable columns and new tables).
+
+Refs: Issue N/A, Commit N/A
+
+
 ## 00.08.00
 
 - Additive: Calendar view now includes checkbox filters for the color-coded time-left buckets and for Completed/Deleted tasks.

@@ -19,23 +19,34 @@ from sqlalchemy.orm import Session
 from ..auth import authenticate_user
 from ..config import get_settings
 from ..crud import (
+    OpenSubtasksError,
+    clear_in_app_unread,
+    clone_task_tree,
     complete_task,
     consume_password_reset_token,
+    count_in_app_unread,
     count_tasks,
     create_password_reset_token,
     create_task,
     create_user,
     delete_user,
+    follow_task,
     get_password_reset_token,
     get_task,
     get_user,
     get_user_by_email,
     get_user_by_username,
+    is_following_task,
+    is_manager_of,
+    list_in_app_notifications,
+    list_descendant_tasks,
     list_tasks,
+    list_subordinate_user_ids,
     list_tags_for_user,
     list_users,
     restore_task,
     soft_delete_task,
+    unfollow_task,
     update_task,
     update_user_admin,
     update_user_me,
@@ -317,6 +328,10 @@ def _merge_stateful_dashboard_filters(
     if _has("tag"):
         state["tag"] = _norm_str(_get("tag"))
 
+    # Search
+    if _has("q"):
+        state["q"] = _norm_str(_get("q"))
+
     # Task type
     if _has("task_type"):
         state["task_type"] = _norm_str(_get("task_type"))
@@ -344,10 +359,18 @@ def _merge_stateful_dashboard_filters(
             # Ignore bad values; keep existing/default.
             pass
 
+    # Manager view selector (include tasks assigned to subordinates)
+    if _has("assigned"):
+        raw = str(_get("assigned") or "").strip().lower()
+        state["assigned"] = raw in {"1", "true", "yes", "on"}
+
     # Defaults
     tag = state.get("tag")
+    q = state.get("q")
     task_type = state.get("task_type")
     sort = state.get("sort") or "due_date"
+
+    assigned = bool(state.get("assigned") or False)
 
     try:
         ps = int(state.get("page_size") or 10)
@@ -371,18 +394,22 @@ def _merge_stateful_dashboard_filters(
     # Normalize what we persist back into the session.
     new_state = {
         "tag": tag,
+        "q": q,
         "task_type": task_type,
         "sort": sort,
         "page_size": ps,
+        "assigned": bool(assigned),
     }
     if is_admin:
         new_state["user_id"] = int(selected_user_id) if selected_user_id is not None else int(current_user_id)
 
     effective = {
         "tag": tag,
+        "q": q,
         "task_type": task_type,
         "sort": sort,
         "page_size": ps,
+        "assigned": bool(assigned),
         "user_id": selected_user_id,
     }
     return effective, new_state
@@ -499,6 +526,28 @@ def _template_context(request: Request, user: Optional[User], db: Session | None
             extra["browser_notifications_enabled"] = bool(enabled)
         except Exception:
             extra["browser_notifications_enabled"] = False
+
+    # In-app notification badge.
+    if user and "in_app_unread_count" not in extra and db is not None:
+        try:
+            extra["in_app_unread_count"] = count_in_app_unread(db, user_id=int(user.id))
+        except Exception:
+            extra["in_app_unread_count"] = 0
+
+    # Navbar search value.
+    if user and "nav_search_q" not in extra:
+        nav_q = ""
+        try:
+            qp = request.query_params.get("q")
+            if qp is not None and str(qp).strip() != "":
+                nav_q = str(qp)
+            else:
+                st = request.session.get(DASHBOARD_FILTERS_SESSION_KEY)
+                if isinstance(st, dict):
+                    nav_q = str(st.get("q") or "")
+        except Exception:
+            nav_q = ""
+        extra["nav_search_q"] = nav_q
 
     return {
         "request": request,
@@ -838,9 +887,11 @@ def dashboard(
     request.session[DASHBOARD_FILTERS_SESSION_KEY] = new_state
 
     tag = effective_filters.get("tag")
+    q = effective_filters.get("q")
     task_type = effective_filters.get("task_type")
     sort = effective_filters.get("sort")
     page_size = effective_filters.get("page_size")
+    include_assigned = bool(effective_filters.get("assigned") or False)
     # Admin view selector (0 = all tasks); non-admin ignores.
     user_id = effective_filters.get("user_id") if user.is_admin else None
 
@@ -866,10 +917,12 @@ def dashboard(
         db,
         current_user=user,
         include_archived=False,
+        search=q,
         tag=tag,
         user_id=effective_user_id,
         task_type=task_type,
         status=None,
+        include_assigned_by_me=(include_assigned if not user.is_admin else False),
     )
 
     total_pages = max(1, (total_count + ps - 1) // ps) if total_count else 1
@@ -882,10 +935,12 @@ def dashboard(
         db,
         current_user=user,
         include_archived=False,
+        search=q,
         tag=tag,
         user_id=effective_user_id,
         task_type=task_type,
         sort=sort or "due_date",
+        include_assigned_by_me=(include_assigned if not user.is_admin else False),
         limit=ps,
         offset=offset,
     )
@@ -893,6 +948,13 @@ def dashboard(
 
     # Admin user selector
     users = list_users(db) if user.is_admin else []
+
+    has_subordinates = False
+    if not user.is_admin:
+        try:
+            has_subordinates = bool(list_subordinate_user_ids(db, manager_user_id=int(user.id)))
+        except Exception:
+            has_subordinates = False
 
     # Task types for filtering
     task_types = _distinct_task_types(
@@ -922,12 +984,18 @@ def dashboard(
     base_params: dict[str, str] = {}
     if tag:
         base_params["tag"] = str(tag)
+    if q:
+        base_params["q"] = str(q)
     if task_type:
         base_params["task_type"] = str(task_type)
     if sort:
         base_params["sort"] = str(sort)
     # Always include page_size once pagination is enabled.
     base_params["page_size"] = str(ps)
+
+    if not user.is_admin:
+        # Preserve manager toggle state.
+        base_params["assigned"] = "1" if include_assigned else "0"
 
     if user.is_admin:
         # Preserve the original admin view selection.
@@ -987,11 +1055,14 @@ def dashboard(
             db=db,
             tasks=rows,
             tag_filter=tag,
+            search_filter=q,
             user_filter=(0 if user.is_admin and user_id == 0 else (effective_user_id if user.is_admin else None)),
             all_users=users,
             task_type_filter=task_type,
             task_types=task_types,
             sort=sort or "due_date",
+            include_assigned=bool(include_assigned if not user.is_admin else False),
+            has_subordinates=bool(has_subordinates),
             page=pnum,
             page_size=ps,
             page_size_options=allowed_page_sizes,
@@ -1196,12 +1267,48 @@ def archived(
 
 
 @router.get("/tasks/new", response_class=HTMLResponse)
-def task_new_get(request: Request, next: str | None = None, db: Session = Depends(get_db)):
+def task_new_get(
+    request: Request,
+    next: str | None = None,
+    parent_task_id: int | None = None,
+    db: Session = Depends(get_db),
+):
     user = _get_current_user(request, db)
     if not user:
         return _redirect("/login")
 
+    parent_task = None
+    selected_assignee_id = int(user.id)
+    assignee_locked = False
+
+    if parent_task_id is not None:
+        parent_task = get_task(db, task_id=int(parent_task_id))
+        if not parent_task:
+            return _redirect("/dashboard")
+        # Allow: owner, admin, or manager of the owner.
+        if not user.is_admin and int(parent_task.user_id) != int(user.id):
+            if not is_manager_of(db, manager_user_id=int(user.id), subordinate_user_id=int(parent_task.user_id)):
+                return _redirect("/dashboard")
+        selected_assignee_id = int(parent_task.user_id)
+        assignee_locked = True
+
+    # Assignee options.
+    assignee_options: list[User] = [user]
+    if user.is_admin:
+        assignee_options = list_users(db)
+    else:
+        subs = list_subordinate_user_ids(db, manager_user_id=int(user.id))
+        if subs:
+            ids = [int(user.id)] + [int(x) for x in subs]
+            assignee_options = db.query(User).filter(User.id.in_(ids)).order_by(User.username.asc()).all()
+
     ctx = _task_form_context(None)
+    if parent_task is not None:
+        try:
+            ctx["due_date"] = iso_for_datetime_local_input(parent_task.due_date_utc)
+        except Exception:
+            pass
+
     return templates.TemplateResponse(
         "task_form.html",
         _template_context(
@@ -1211,6 +1318,11 @@ def task_new_get(request: Request, next: str | None = None, db: Session = Depend
             mode="new",
             error=None,
             next_url=_safe_next_url(next, default="/dashboard"),
+            parent_task=parent_task,
+            parent_task_id=(int(parent_task_id) if parent_task_id is not None else None),
+            assignee_options=assignee_options,
+            selected_assignee_id=int(selected_assignee_id),
+            assignee_locked=bool(assignee_locked),
             **ctx,
         ),
     )
@@ -1228,6 +1340,8 @@ def task_new_post(
     recurrence_interval: str = Form(""),
     recurrence_times: str = Form(""),
     tags: str = Form(""),
+    parent_task_id: str = Form(""),
+    assignee_user_id: str = Form(""),
     next: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -1263,15 +1377,91 @@ def task_new_post(
                     mode="new",
                     error="Invalid due date format",
                     next_url=_safe_next_url(next, default="/dashboard"),
+                    parent_task=None,
+                    parent_task_id=(
+                        int(str(parent_task_id).strip())
+                        if str(parent_task_id or "").strip().lstrip("-").isdigit()
+                        else None
+                    ),
+                    assignee_options=(list_users(db) if user.is_admin else [user]),
+                    selected_assignee_id=int(user.id),
+                    assignee_locked=False,
                     **ctx,
                 ),
                 status_code=400,
             )
 
+    # Determine assignee and parent.
+    parent_id: int | None = None
+    if str(parent_task_id or "").strip() != "":
+        try:
+            parent_id = int(parent_task_id)
+        except Exception:
+            parent_id = None
+
+    parent_task = None
+    selected_assignee_id = int(user.id)
+    assignee_locked = False
+
+    if parent_id is not None:
+        parent_task = get_task(db, task_id=int(parent_id))
+        if not parent_task:
+            ctx = _task_form_context(None)
+            return templates.TemplateResponse(
+                "task_form.html",
+                _template_context(
+                    request,
+                    user,
+                    db=db,
+                    mode="new",
+                    error="Parent task not found",
+                    next_url=_safe_next_url(next, default="/dashboard"),
+                    parent_task=None,
+                    parent_task_id=None,
+                    assignee_options=(list_users(db) if user.is_admin else [user]),
+                    selected_assignee_id=int(user.id),
+                    assignee_locked=False,
+                    **ctx,
+                ),
+                status_code=400,
+            )
+
+        selected_assignee_id = int(parent_task.user_id)
+        assignee_locked = True
+
+        if not user.is_admin and selected_assignee_id != int(user.id):
+            if not is_manager_of(db, manager_user_id=int(user.id), subordinate_user_id=int(selected_assignee_id)):
+                return _redirect("/dashboard")
+    else:
+        if str(assignee_user_id or "").strip() != "":
+            try:
+                selected_assignee_id = int(assignee_user_id)
+            except Exception:
+                selected_assignee_id = int(user.id)
+
+    owner_user = get_user(db, user_id=int(selected_assignee_id))
+    if not owner_user:
+        return _redirect("/dashboard")
+
+    if not user.is_admin and int(owner_user.id) != int(user.id):
+        if not is_manager_of(db, manager_user_id=int(user.id), subordinate_user_id=int(owner_user.id)):
+            return _redirect("/dashboard")
+
+    assigned_by_id = int(user.id) if int(owner_user.id) != int(user.id) else None
+
+    assignee_options: list[User] = [user]
+    if user.is_admin:
+        assignee_options = list_users(db)
+    else:
+        subs = list_subordinate_user_ids(db, manager_user_id=int(user.id))
+        if subs:
+            ids = [int(user.id)] + [int(x) for x in subs]
+            assignee_options = db.query(User).filter(User.id.in_(ids)).order_by(User.username.asc()).all()
+
     try:
         create_task(
             db,
-            owner=user,
+            owner=owner_user,
             name=name,
             task_type=task_type,
             description=description or None,
@@ -1281,6 +1471,8 @@ def task_new_post(
             recurrence_interval=recurrence_interval or None,
             recurrence_times=recurrence_times or None,
             tags=_parse_tags_csv(tags),
+            parent_task_id=parent_id,
+            assigned_by_user_id=assigned_by_id,
         )
     except Exception as e:
         ctx = {
@@ -1304,12 +1496,96 @@ def task_new_post(
                 mode="new",
                 error=str(e),
                 next_url=_safe_next_url(next, default="/dashboard"),
+                parent_task=parent_task,
+                parent_task_id=parent_id,
+                assignee_options=assignee_options,
+                selected_assignee_id=int(selected_assignee_id),
+                assignee_locked=bool(assignee_locked),
                 **ctx,
             ),
             status_code=400,
         )
 
     return _redirect(_safe_next_url(next, default="/dashboard"))
+
+
+@router.post("/tasks/{task_id}/clone")
+def task_clone(
+    request: Request,
+    task_id: int,
+    next: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+
+    task = get_task(db, task_id=task_id)
+    if not task:
+        return _redirect("/dashboard")
+
+    if not user.is_admin and int(task.user_id) != int(user.id):
+        return _redirect("/dashboard")
+
+    next_url = _safe_next_url(next, default="/dashboard")
+    try:
+        cloned = clone_task_tree(
+            db,
+            source_task=task,
+            new_owner_user_id=int(task.user_id),
+            new_parent_task_id=(int(task.parent_task_id) if getattr(task, "parent_task_id", None) else None),
+        )
+    except Exception:
+        logger.exception("Failed to clone task %s", task_id)
+        return _redirect(next_url)
+
+    return _redirect(f"/tasks/{int(cloned.id)}/edit?next={quote(next_url)}")
+
+
+@router.post("/tasks/{task_id}/follow")
+def task_follow(
+    request: Request,
+    task_id: int,
+    next: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+
+    task = get_task(db, task_id=task_id)
+    if not task:
+        return _redirect("/dashboard")
+
+    next_url = _safe_next_url(next, default=f"/tasks/{task_id}/edit")
+    try:
+        follow_task(db, follower=user, task=task)
+    except Exception:
+        logger.exception("Failed to follow task %s", task_id)
+    return _redirect(next_url)
+
+
+@router.post("/tasks/{task_id}/unfollow")
+def task_unfollow(
+    request: Request,
+    task_id: int,
+    next: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+
+    task = get_task(db, task_id=task_id)
+    if not task:
+        return _redirect("/dashboard")
+
+    next_url = _safe_next_url(next, default=f"/tasks/{task_id}/edit")
+    try:
+        unfollow_task(db, follower=user, task=task)
+    except Exception:
+        logger.exception("Failed to unfollow task %s", task_id)
+    return _redirect(next_url)
 
 
 @router.get("/tasks/{task_id}/edit", response_class=HTMLResponse)
@@ -1321,8 +1597,67 @@ def task_edit_get(request: Request, task_id: int, next: str | None = None, db: S
     task = get_task(db, task_id=task_id)
     if not task:
         return _redirect("/dashboard")
-    if not user.is_admin and task.user_id != user.id:
+
+    # View permission: owner/admin; managers may view subordinate tasks.
+    can_view = bool(user.is_admin or int(task.user_id) == int(user.id))
+    if not can_view:
+        try:
+            if is_manager_of(db, manager_user_id=int(user.id), subordinate_user_id=int(task.user_id)):
+                can_view = True
+        except Exception:
+            can_view = False
+    if not can_view:
+        # Fallback: allow viewing tasks explicitly assigned by this user.
+        try:
+            if getattr(task, "assigned_by_user_id", None) and int(task.assigned_by_user_id) == int(user.id):
+                can_view = True
+        except Exception:
+            pass
+    if not can_view:
         return _redirect("/dashboard")
+
+    can_edit = bool(user.is_admin or int(task.user_id) == int(user.id))
+
+    # Parent task (if any)
+    parent_task = None
+    try:
+        if getattr(task, "parent_task_id", None):
+            parent_task = get_task(db, task_id=int(task.parent_task_id))
+    except Exception:
+        parent_task = None
+
+    # Descendant tasks
+    descendant_rows = []
+    try:
+        descendants = list_descendant_tasks(db, root_task_id=int(task.id))
+        parent_map: dict[int, int | None] = {int(task.id): None}
+        for t in descendants:
+            parent_map[int(t.id)] = (int(t.parent_task_id) if getattr(t, "parent_task_id", None) else None)
+
+        for t in descendants:
+            depth = 0
+            pid = parent_map.get(int(t.id))
+            seen = set()
+            while pid is not None and pid != int(task.id):
+                if pid in seen:
+                    break
+                seen.add(pid)
+                depth += 1
+                pid = parent_map.get(pid)
+            descendant_rows.append({"task": t, "depth": depth})
+    except Exception:
+        descendant_rows = []
+
+    # Follow state
+    can_follow = False
+    following = False
+    try:
+        if int(task.user_id) != int(user.id) and (user.is_admin or is_manager_of(db, manager_user_id=int(user.id), subordinate_user_id=int(task.user_id))):
+            can_follow = True
+            following = is_following_task(db, follower_user_id=int(user.id), task_id=int(task.id))
+    except Exception:
+        can_follow = False
+        following = False
 
     ctx = _task_form_context(task)
     return templates.TemplateResponse(
@@ -1334,6 +1669,11 @@ def task_edit_get(request: Request, task_id: int, next: str | None = None, db: S
             mode="edit",
             error=None,
             next_url=_safe_next_url(next, default="/dashboard"),
+            can_edit=bool(can_edit),
+            can_follow=bool(can_follow),
+            is_following=bool(following),
+            parent_task=parent_task,
+            descendant_rows=descendant_rows,
             **ctx,
         ),
     )
@@ -1440,7 +1780,13 @@ def task_edit_post(
 
 
 @router.post("/tasks/{task_id}/complete")
-def task_complete(request: Request, task_id: int, next: str = Form(""), db: Session = Depends(get_db)):
+def task_complete(
+    request: Request,
+    task_id: int,
+    next: str = Form(""),
+    cascade: str = Form("0"),
+    db: Session = Depends(get_db),
+):
     user = _get_current_user(request, db)
     if not user:
         return _redirect("/login")
@@ -1450,16 +1796,49 @@ def task_complete(request: Request, task_id: int, next: str = Form(""), db: Sess
         return _redirect("/dashboard")
 
     when = now_utc()
+    next_url = _safe_next_url(next, default="/dashboard")
+    cascade_flag = str(cascade or "").strip().lower() in {"1", "true", "yes", "on"}
     try:
-        complete_task(db, task=task, current_user=user, when_utc=when)
+        complete_task(
+            db,
+            task=task,
+            current_user=user,
+            when_utc=when,
+            cascade_subtasks=bool(cascade_flag),
+            spawn_recurrence=True,
+        )
+    except OpenSubtasksError as e:
+        open_rows = []
+        for t in getattr(e, "open_tasks", []) or []:
+            open_rows.append({"id": int(t.id), "name": t.name, "task_type": t.task_type})
+        return templates.TemplateResponse(
+            "confirm_close_subtasks.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                task=task,
+                open_tasks=open_rows,
+                action="complete",
+                action_url=f"/tasks/{task_id}/complete",
+                next_url=next_url,
+            ),
+            status_code=409,
+        )
     except Exception:
         logger.exception("Failed to complete task %s", task_id)
 
-    return _redirect(_safe_next_url(next, default="/dashboard"))
+    return _redirect(next_url)
 
 
 @router.post("/tasks/{task_id}/delete")
-def task_delete(request: Request, task_id: int, next: str = Form(""), db: Session = Depends(get_db)):
+def task_delete(
+    request: Request,
+    task_id: int,
+    next: str = Form(""),
+    cascade: str = Form("0"),
+    db: Session = Depends(get_db),
+):
     user = _get_current_user(request, db)
     if not user:
         return _redirect("/login")
@@ -1469,12 +1848,38 @@ def task_delete(request: Request, task_id: int, next: str = Form(""), db: Sessio
         return _redirect("/dashboard")
 
     when = now_utc()
+    next_url = _safe_next_url(next, default="/dashboard")
+    cascade_flag = str(cascade or "").strip().lower() in {"1", "true", "yes", "on"}
     try:
-        soft_delete_task(db, task=task, current_user=user, when_utc=when)
+        soft_delete_task(
+            db,
+            task=task,
+            current_user=user,
+            when_utc=when,
+            cascade_subtasks=bool(cascade_flag),
+        )
+    except OpenSubtasksError as e:
+        open_rows = []
+        for t in getattr(e, "open_tasks", []) or []:
+            open_rows.append({"id": int(t.id), "name": t.name, "task_type": t.task_type})
+        return templates.TemplateResponse(
+            "confirm_close_subtasks.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                task=task,
+                open_tasks=open_rows,
+                action="delete",
+                action_url=f"/tasks/{task_id}/delete",
+                next_url=next_url,
+            ),
+            status_code=409,
+        )
     except Exception:
         logger.exception("Failed to delete task %s", task_id)
 
-    return _redirect(_safe_next_url(next, default="/dashboard"))
+    return _redirect(next_url)
 
 
 @router.post("/tasks/{task_id}/restore")
@@ -1778,6 +2183,98 @@ async def profile_notifications_post(request: Request, db: Session = Depends(get
         ),
     )
 
+
+@router.get("/notifications", response_class=HTMLResponse)
+def notifications_inbox(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+
+    try:
+        clear_in_app_unread(db, user_id=int(user.id))
+    except Exception:
+        pass
+
+    events = []
+    try:
+        events = list_in_app_notifications(db, user_id=int(user.id), include_cleared=True, limit=200)
+    except Exception:
+        logger.exception("Failed to list in-app notifications")
+
+    return templates.TemplateResponse(
+        "notifications_inbox.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            notifications=events,
+        ),
+    )
+
+
+@router.get("/notifications/unread_count")
+def notifications_unread_count(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user:
+        return JSONResponse({"count": 0}, status_code=401)
+    try:
+        c = count_in_app_unread(db, user_id=int(user.id))
+    except Exception:
+        c = 0
+    return JSONResponse({"count": int(c)})
+
+
+@router.get("/notifications/list")
+def notifications_list(
+    request: Request,
+    include_cleared: int = 1,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+):
+    user = _get_current_user(request, db)
+    if not user:
+        return JSONResponse({"items": []}, status_code=401)
+
+    try:
+        events = list_in_app_notifications(
+            db,
+            user_id=int(user.id),
+            include_cleared=bool(int(include_cleared or 0)),
+            limit=int(limit),
+        )
+    except Exception:
+        events = []
+
+    items = []
+    for ev in events:
+        try:
+            items.append(
+                {
+                    "id": int(ev.id),
+                    "task_id": (int(ev.task_id) if ev.task_id is not None else None),
+                    "event_type": ev.event_type,
+                    "title": ev.title,
+                    "message": ev.message,
+                    "created_at": (ev.created_at.isoformat() if ev.created_at else None),
+                    "cleared": bool(getattr(ev, "cleared_at_utc", None) is not None),
+                }
+            )
+        except Exception:
+            continue
+    return JSONResponse({"items": items})
+
+
+@router.post("/notifications/clear_unread")
+def notifications_clear_unread(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user:
+        return JSONResponse({"cleared": 0, "count": 0}, status_code=401)
+    try:
+        cleared = clear_in_app_unread(db, user_id=int(user.id))
+    except Exception:
+        cleared = 0
+    return JSONResponse({"cleared": int(cleared), "count": 0})
+
 @router.get("/notifications/stream")
 async def notifications_stream(request: Request):
     """Server-Sent Events stream for browser notifications.
@@ -1890,6 +2387,7 @@ def admin_users_get(request: Request, db: Session = Depends(get_db)):
             user,
             db=db,
             users=users,
+            manager_options=users,
             error=None,
         ),
     )
@@ -1907,6 +2405,8 @@ def admin_users_edit_get(request: Request, user_id: int, db: Session = Depends(g
     if not target:
         return _redirect("/admin/users")
 
+    manager_options = list_users(db)
+
     return templates.TemplateResponse(
         "user_edit.html",
         _template_context(
@@ -1914,6 +2414,7 @@ def admin_users_edit_get(request: Request, user_id: int, db: Session = Depends(g
             admin,
             db=db,
             target=target,
+            manager_options=manager_options,
             error=None,
             success=None,
         ),
@@ -1927,6 +2428,7 @@ def admin_users_edit_post(
     username: str = Form(...),
     email: str = Form(""),
     is_admin: bool = Form(False),
+    manager_id: str = Form(""),
     theme: str = Form(Theme.system.value),
     purge_days: int = Form(...),
     new_password: str = Form(""),
@@ -1957,17 +2459,25 @@ def admin_users_edit_post(
         )
 
     try:
+        mid: int | None
+        if str(manager_id or "").strip() == "":
+            mid = None
+        else:
+            mid = int(manager_id)
+
         update_user_admin(
             db,
             user_id=user_id,
             username=username,
             email=email,
             is_admin=bool(is_admin),
+            manager_id=mid,
             theme=theme,
             purge_days=int(purge_days),
             new_password=(new_password or None),
         )
         db.refresh(target)
+        manager_options = list_users(db)
         return templates.TemplateResponse(
             "user_edit.html",
             _template_context(
@@ -1975,11 +2485,13 @@ def admin_users_edit_post(
                 admin,
                 db=db,
                 target=target,
+                manager_options=manager_options,
                 error=None,
                 success="Saved",
             ),
         )
     except Exception as e:
+        manager_options = list_users(db)
         return templates.TemplateResponse(
             "user_edit.html",
             _template_context(
@@ -1991,9 +2503,11 @@ def admin_users_edit_post(
                     "username": username,
                     "email": email,
                     "is_admin": bool(is_admin),
+                    "manager_id": (int(manager_id) if str(manager_id or "").strip() else None),
                     "theme": theme,
                     "purge_days": purge_days,
                 },
+                manager_options=manager_options,
                 error=str(e),
                 success=None,
             ),
@@ -2008,6 +2522,7 @@ def admin_users_create(
     password: str = Form(...),
     email: str = Form(""),
     is_admin: bool = Form(False),
+    manager_id: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = _get_current_user(request, db)
@@ -2025,13 +2540,26 @@ def admin_users_create(
                 user,
                 db=db,
                 users=users,
+                manager_options=users,
                 error="Username already exists",
             ),
             status_code=400,
         )
 
     try:
-        create_user(db, username=username, password=password, is_admin=bool(is_admin), email=email or None)
+        mid: int | None
+        if str(manager_id or "").strip() == "":
+            mid = None
+        else:
+            mid = int(manager_id)
+        create_user(
+            db,
+            username=username,
+            password=password,
+            is_admin=bool(is_admin),
+            email=email or None,
+            manager_id=mid,
+        )
     except Exception as e:
         users = list_users(db)
         return templates.TemplateResponse(
@@ -2041,6 +2569,7 @@ def admin_users_create(
                 user,
                 db=db,
                 users=users,
+                manager_options=users,
                 error=str(e),
             ),
             status_code=400,
@@ -2073,7 +2602,12 @@ def admin_users_toggle_admin(request: Request, user_id: int, db: Session = Depen
 
 
 @router.post("/admin/users/{user_id}/delete")
-def admin_users_delete(request: Request, user_id: int, db: Session = Depends(get_db)):
+def admin_users_delete(
+    request: Request,
+    user_id: int,
+    reassign_completed_to_user_id: str = Form(""),
+    db: Session = Depends(get_db),
+):
     user = _get_current_user(request, db)
     if not user:
         return _redirect("/login")
@@ -2083,7 +2617,19 @@ def admin_users_delete(request: Request, user_id: int, db: Session = Depends(get
     if user.id == user_id:
         return _redirect("/admin/users")
 
-    delete_user(db, user_id=user_id)
+    reassignee: int | None = None
+    if str(reassign_completed_to_user_id or "").strip() != "":
+        try:
+            reassignee = int(reassign_completed_to_user_id)
+        except Exception:
+            reassignee = None
+    if reassignee is not None and reassignee == int(user_id):
+        reassignee = None
+
+    try:
+        delete_user(db, user_id=user_id, reassign_completed_to_user_id=reassignee)
+    except Exception:
+        logger.exception("Failed to delete user %s", user_id)
     return _redirect("/admin/users")
 
 
