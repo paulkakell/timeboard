@@ -61,7 +61,7 @@
           <div class="mb-2">
             <label class="form-label">To address (optional)</label>
             <input class="form-control" name="email_to_address" value="{{ svc.cfg.get('to_address','') }}" placeholder="Leave blank to use your account email ({{ current_user.email or 'not set' }})">
-            <div class="form-text">Requires admin SMTP configuration.</div>
+            <div class="form-text">Requires admin email configuration (SMTP or SendGrid).</div>
           </div>
 
         {% elif svc.service_type == 'gotify' %}

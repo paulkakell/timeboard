@@ -1,6 +1,25 @@
 # Changelog
 
 
+## 00.06.00
+
+- Additive: Email can now be delivered via SendGrid API (v3) as an alternative to SMTP. Configurable in Admin → Email and via the Admin email settings API.
+- Fix: Admin email settings API now supports partial updates consistently (mirrors the logging/WNS admin endpoints behavior).
+
+Compatibility: Backward compatible.
+
+Refs: Issue N/A, Commit N/A
+
+
+## 00.05.01
+
+- Fix: Email (SMTP) delivery failures now include host/port/timeout context (and a Docker/localhost hint) in logs and notification event delivery errors to make configuration and networking issues easier to diagnose.
+
+Compatibility: Backward compatible.
+
+Refs: Issue N/A, Commit N/A
+
+
 ## 00.05.00
 
 - Additive: Asynchronous delivery for all non-browser notification services (email, gotify, ntfy, discord, webhook, generic_api, wns) so task create/update/complete no longer blocks on network calls.

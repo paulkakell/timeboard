@@ -2,7 +2,7 @@
 
 A lightweight, dockerized task board that supports recurrence intervals shorter than a day.
 
-Current version: **00.05.00**
+Current version: **00.06.00**
 
 Repository:
 - https://github.com/paulkakell/timeboard
@@ -77,7 +77,11 @@ Common settings:
 - `database.path`: SQLite DB file path (default `/data/timeboard.db`).
 - `purge.default_days`: default purge window for archived tasks.
 - `purge.interval_minutes`: how often the purge job runs.
-- `email.*`: legacy seed values (copied into the database on first run if no DB settings exist). Runtime configuration is managed in the admin UI.
+- `email.*`: legacy seed values (copied into the database on first run if no DB settings exist). Runtime configuration is managed in the admin UI (SMTP or SendGrid).
+
+Docker note (SMTP): if Timeboard is running in a container, setting the SMTP host to `localhost` / `127.0.0.1` will try to connect to the container itself.
+Use a hostname/IP reachable from inside the container (for example: an SMTP container service name on the same docker-compose network, or `host.docker.internal`
+when using Docker Desktop).
 
 ## API usage
 
@@ -152,7 +156,7 @@ curl http://localhost:8888/api/notifications/events?limit=50 \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-Admin: update SMTP settings (admin only):
+Admin: update email settings (admin only):
 
 ```bash
 curl -X PUT http://localhost:8888/api/admin/email \
@@ -160,12 +164,28 @@ curl -X PUT http://localhost:8888/api/admin/email \
   -H "Content-Type: application/json" \
   -d '{
     "enabled": true,
+    "provider": "smtp",
     "smtp_host": "smtp.example.com",
     "smtp_port": 587,
     "smtp_username": "user@example.com",
     "smtp_password": "YOUR_PASSWORD",
     "smtp_from": "Timeboard <timeboard@example.com>",
     "use_tls": true
+  }'
+
+```
+
+Admin: update SendGrid settings (admin only):
+
+```bash
+curl -X PUT http://localhost:8888/api/admin/email \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "provider": "sendgrid",
+    "sendgrid_api_key": "YOUR_SENDGRID_API_KEY",
+    "smtp_from": "Timeboard <timeboard@example.com>"
   }'
 ```
 

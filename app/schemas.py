@@ -192,11 +192,13 @@ class NotificationEventOut(BaseModel):
 
 class AdminEmailSettingsOut(BaseModel):
     enabled: bool
+    provider: str = Field(default="smtp", description="Email delivery provider: smtp | sendgrid")
     smtp_host: str
     smtp_port: int
     smtp_username: str
     smtp_from: str
     use_tls: bool
+    sendgrid_api_key_set: bool = Field(default=False, description="True if a SendGrid API key is stored in DB (not returned).")
     reminder_interval_minutes: int
     reset_token_minutes: int
     smtp_password_set: bool = Field(default=False, description="True if a password is stored in DB (not returned).")
@@ -204,15 +206,18 @@ class AdminEmailSettingsOut(BaseModel):
 
 class AdminEmailSettingsUpdate(BaseModel):
     enabled: Optional[bool] = None
+    provider: Optional[str] = Field(default=None, description="Email delivery provider: smtp | sendgrid")
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = None
     smtp_username: Optional[str] = None
     smtp_password: Optional[str] = Field(default=None, description="If omitted/blank, existing password can be kept.")
     smtp_from: Optional[str] = None
     use_tls: Optional[bool] = None
+    sendgrid_api_key: Optional[str] = Field(default=None, description="If omitted/blank, existing API key can be kept.")
     reminder_interval_minutes: Optional[int] = None
     reset_token_minutes: Optional[int] = None
     keep_existing_password: bool = True
+    keep_existing_sendgrid_api_key: bool = True
 
 
 class AdminLoggingSettingsOut(BaseModel):

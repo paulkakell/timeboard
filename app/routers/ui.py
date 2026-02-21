@@ -2173,12 +2173,14 @@ async def admin_email_post(request: Request, db: Session = Depends(get_db)):
 
     form = await request.form()
     enabled = form.get("enabled") == "on"
+    provider = str(form.get("provider") or "smtp")
     smtp_host = str(form.get("smtp_host") or "")
     smtp_port = int(form.get("smtp_port") or 587)
     smtp_username = str(form.get("smtp_username") or "")
     smtp_password = str(form.get("smtp_password") or "")
     smtp_from = str(form.get("smtp_from") or "")
     use_tls = form.get("use_tls") == "on"
+    sendgrid_api_key = str(form.get("sendgrid_api_key") or "")
     reminder_interval_minutes = int(form.get("reminder_interval_minutes") or 60)
     reset_token_minutes = int(form.get("reset_token_minutes") or 60)
 
@@ -2187,19 +2189,27 @@ async def admin_email_post(request: Request, db: Session = Depends(get_db)):
     if clear_password:
         smtp_password = ""
 
+    clear_sendgrid_api_key = form.get("clear_sendgrid_api_key") == "on"
+    keep_existing_sendgrid_api_key = (not clear_sendgrid_api_key) and (sendgrid_api_key.strip() == "")
+    if clear_sendgrid_api_key:
+        sendgrid_api_key = ""
+
     try:
         cfg = set_email_settings(
             db,
             enabled=enabled,
+            provider=provider,
             smtp_host=smtp_host,
             smtp_port=smtp_port,
             smtp_username=smtp_username,
             smtp_password=smtp_password,
             smtp_from=smtp_from,
             use_tls=use_tls,
+            sendgrid_api_key=sendgrid_api_key,
             reminder_interval_minutes=reminder_interval_minutes,
             reset_token_minutes=reset_token_minutes,
             keep_existing_password=keep_existing_password,
+            keep_existing_sendgrid_api_key=keep_existing_sendgrid_api_key,
         )
         # Reconfigure reminder jobs immediately.
         cfg_fn = getattr(request.app.state, "configure_email_jobs", None)

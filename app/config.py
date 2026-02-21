@@ -39,6 +39,9 @@ class EmailSettings(BaseModel):
     # When disabled, password reset and reminders are not sent.
     enabled: bool = False
 
+    # Delivery provider: "smtp" or "sendgrid".
+    provider: str = "smtp"
+
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
@@ -48,6 +51,9 @@ class EmailSettings(BaseModel):
 
     # If True, use STARTTLS.
     use_tls: bool = True
+
+    # SendGrid v3 API key (used when provider == "sendgrid").
+    sendgrid_api_key: str = ""
 
     # Overdue reminder cadence.
     reminder_interval_minutes: int = 60
@@ -87,7 +93,7 @@ def _ensure_settings_file(path: str) -> None:
             "security:\n  session_secret: 'CHANGE_ME_SESSION_SECRET'\n  jwt_secret: 'CHANGE_ME_JWT_SECRET'\n"
             "database:\n  path: '/data/timeboard.db'\n"
             "purge:\n  default_days: 15\n  interval_minutes: 60\n"
-            "email:\n  enabled: false\n  smtp_host: ''\n  smtp_port: 587\n  smtp_username: ''\n  smtp_password: ''\n  smtp_from: 'timeboard@localhost'\n  use_tls: true\n  reminder_interval_minutes: 60\n  reset_token_minutes: 60\n"
+            "email:\n  enabled: false\n  provider: 'smtp'\n  smtp_host: ''\n  smtp_port: 587\n  smtp_username: ''\n  smtp_password: ''\n  smtp_from: 'timeboard@localhost'\n  use_tls: true\n  sendgrid_api_key: ''\n  reminder_interval_minutes: 60\n  reset_token_minutes: 60\n"
         )
 
 

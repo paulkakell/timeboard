@@ -21,12 +21,21 @@ email:
   # These values are only used to SEED the database on first run (or when the
   # database is missing the corresponding keys).
   enabled: false
+
+  # Delivery provider: "smtp" (default) or "sendgrid".
+  provider: "smtp"
+
+  # --- SMTP (used when provider: smtp) ---------------------------------------
   smtp_host: ""                   # e.g. smtp.gmail.com
   smtp_port: 587
   smtp_username: ""
   smtp_password: ""
   smtp_from: "timeboard@localhost"
   use_tls: true
+
+  # --- SendGrid API (used when provider: sendgrid) ---------------------------
+  sendgrid_api_key: ""             # SendGrid v3 API key
+
   reminder_interval_minutes: 60    # Set to 0 to disable reminders
   reset_token_minutes: 60          # Password reset link TTL
 

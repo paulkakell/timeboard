@@ -84,16 +84,25 @@ def _configure_email_jobs(app: FastAPI, sched: BackgroundScheduler) -> None:
     # Store current config snapshot for UI rendering/debug.
     app.state.email_config = {
         "enabled": bool(cfg.enabled),
+        "provider": str(getattr(cfg, "provider", "smtp") or "smtp"),
         "smtp_host": str(cfg.smtp_host or ""),
         "smtp_port": int(cfg.smtp_port),
         "smtp_username": str(cfg.smtp_username or ""),
         "smtp_from": str(cfg.smtp_from or ""),
         "use_tls": bool(cfg.use_tls),
+        "sendgrid_api_key_set": bool(getattr(cfg, "sendgrid_api_key", "") or ""),
         "reminder_interval_minutes": int(cfg.reminder_interval_minutes),
         "reset_token_minutes": int(cfg.reset_token_minutes),
     }
 
-    if not cfg.enabled or not cfg.smtp_host or int(cfg.reminder_interval_minutes) <= 0:
+    provider = str(getattr(cfg, "provider", "smtp") or "smtp").strip().lower() or "smtp"
+    is_configured = False
+    if provider == "sendgrid":
+        is_configured = bool(str(getattr(cfg, "sendgrid_api_key", "") or "").strip())
+    else:
+        is_configured = bool(str(cfg.smtp_host or "").strip())
+
+    if (not cfg.enabled) or (not is_configured) or int(cfg.reminder_interval_minutes) <= 0:
         return
 
     def _reminder_job() -> None:
