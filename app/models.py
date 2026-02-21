@@ -61,6 +61,16 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Optional user hierarchy.
+    # - Admins may assign a manager to any user.
+    # - Managers are users who have one or more subordinates.
+    manager_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     theme: Mapped[str] = mapped_column(String(16), default=Theme.system.value, nullable=False)
     purge_days: Mapped[int] = mapped_column(Integer, default=15, nullable=False)
 
@@ -76,7 +86,22 @@ class User(Base):
     tasks: Mapped[list["Task"]] = relationship(
         "Task",
         back_populates="user",
+        foreign_keys="Task.user_id",
         cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    # Self-referential relationship.
+    manager: Mapped["User"] = relationship(
+        "User",
+        remote_side=[id],
+        back_populates="subordinates",
+        foreign_keys=[manager_id],
+    )
+    subordinates: Mapped[list["User"]] = relationship(
+        "User",
+        back_populates="manager",
+        foreign_keys=[manager_id],
         passive_deletes=True,
     )
 
@@ -244,6 +269,11 @@ class NotificationEvent(Base):
     last_attempt_at_utc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     delivered_at_utc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # In-app notifications use `cleared_at_utc` for "new" badge state.
+    # Uncleared notifications persist indefinitely. Cleared notifications are
+    # eligible for purge using the same retention policy as archived tasks.
+    cleared_at_utc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
@@ -266,6 +296,24 @@ class Task(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+    # Nested subtasks.
+    parent_task_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # Task assignment attribution (optional).
+    # When a manager assigns a task to a subordinate, `user_id` is the assignee
+    # and `assigned_by_user_id` is the manager.
+    assigned_by_user_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     task_type: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -297,7 +345,30 @@ class Task(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
-    user: Mapped[User] = relationship("User", back_populates="tasks")
+    user: Mapped[User] = relationship(
+        "User",
+        back_populates="tasks",
+        foreign_keys=[user_id],
+    )
+
+    parent: Mapped["Task"] = relationship(
+        "Task",
+        remote_side=[id],
+        back_populates="children",
+        foreign_keys=[parent_task_id],
+    )
+    children: Mapped[list["Task"]] = relationship(
+        "Task",
+        back_populates="parent",
+        foreign_keys=[parent_task_id],
+        passive_deletes=True,
+    )
+
+    assigned_by: Mapped[User] = relationship(
+        "User",
+        foreign_keys=[assigned_by_user_id],
+        lazy="joined",
+    )
 
     tags: Mapped[list[Tag]] = relationship(
         "Tag",
@@ -311,3 +382,32 @@ class Task(Base):
         if self.status == TaskStatus.deleted:
             return self.deleted_at_utc
         return None
+
+
+class TaskFollow(Base):
+    """A user's subscription to another user's task.
+
+    Used for manager "follow" notifications.
+    """
+
+    __tablename__ = "task_follows"
+    __table_args__ = (
+        UniqueConstraint("follower_user_id", "task_id", name="uq_task_follows_follower_task"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    follower_user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+

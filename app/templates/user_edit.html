@@ -21,6 +21,19 @@
       <input class="form-control" type="email" name="email" value="{{ target.email or '' }}" placeholder="name@example.com">
     </div>
 
+	    <div class="col-12 col-md-6">
+	      <label class="form-label">Manager</label>
+	      <select class="form-select" name="manager_id">
+	        <option value="" {% if not target.manager_id %}selected{% endif %}>None</option>
+	        {% for mu in manager_options %}
+	          {% if mu.id != target.id %}
+	            <option value="{{ mu.id }}" {% if target.manager_id == mu.id %}selected{% endif %}>{{ mu.username }}</option>
+	          {% endif %}
+	        {% endfor %}
+	      </select>
+	      <div class="form-text">Optional reporting line (supports hierarchies).</div>
+	    </div>
+
     <div class="col-12 col-md-6">
       <label class="form-label">Theme</label>
       <select class="form-select" name="theme">

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Confirm{% endblock %}
+
+{% block content %}
+  <h2 class="mb-3">Action requires closing subtasks</h2>
+
+  <div class="alert alert-warning">
+    The task <strong>{{ task.name }}</strong> has open subtasks. You must close them first.
+  </div>
+
+  {% if open_tasks and open_tasks|length > 0 %}
+    <div class="mb-3">
+      <div class="fw-semibold">Open subtasks</div>
+      <ul class="mb-0">
+        {% for t in open_tasks %}
+          <li>
+            <a href="/tasks/{{ t.id }}/edit?next={{ next_url|urlencode }}">{{ t.name }}</a>
+            <span class="text-muted">({{ t.task_type }})</span>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <div class="d-flex gap-2">
+    <form method="post" action="{{ action_url }}">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <input type="hidden" name="cascade" value="1">
+      {% if action == 'delete' %}
+        <button class="btn btn-danger" type="submit">Close subtasks and delete</button>
+      {% else %}
+        <button class="btn btn-primary" type="submit">Close subtasks and complete</button>
+      {% endif %}
+    </form>
+    <a class="btn btn-outline-secondary" href="/tasks/{{ task.id }}/edit?next={{ next_url|urlencode }}">Cancel</a>
+  </div>
+{% endblock %}

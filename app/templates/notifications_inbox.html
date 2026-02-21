@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Notifications{% endblock %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <h2 class="mb-0">Notifications</h2>
+    <a class="btn btn-outline-secondary" href="/profile/notifications">Settings</a>
+  </div>
+
+  {% if not notifications or notifications|length == 0 %}
+    <div class="text-muted">No notifications.</div>
+  {% else %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead>
+          <tr>
+            <th style="min-width: 160px;">When</th>
+            <th>Title</th>
+            <th>Message</th>
+            <th style="min-width: 120px;">Task</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for n in notifications %}
+            <tr>
+              <td class="text-muted">{{ n.created_at|dt_local }}</td>
+              <td class="fw-semibold">{{ n.title }}</td>
+              <td>{{ n.message }}</td>
+              <td>
+                {% if n.task_id %}
+                  <a href="/tasks/{{ n.task_id }}/edit?next={{ request.url.path|urlencode }}">Open</a>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+{% endblock %}

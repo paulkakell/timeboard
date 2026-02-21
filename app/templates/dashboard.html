@@ -34,6 +34,17 @@
     </select>
   </div>
 
+  {% if current_user and (not current_user.is_admin) and has_subordinates %}
+  <div class="col-12 col-md-2">
+    <label class="form-label">Manager</label>
+    <div class="form-check">
+      <input type="hidden" name="assigned" value="0">
+      <input class="form-check-input" type="checkbox" id="assigned" name="assigned" value="1" {% if include_assigned %}checked{% endif %}>
+      <label class="form-check-label" for="assigned">Include assigned</label>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="col-12 col-md-2">
     <label class="form-label">Sort</label>
     <select class="form-select" name="sort">
@@ -70,7 +81,7 @@
     <table class="table table-hover align-middle">
       <thead>
         <tr>
-          {% if current_user.is_admin and user_filter == 0 %}<th>User</th>{% endif %}
+          {% if (current_user.is_admin and user_filter == 0) or ((not current_user.is_admin) and include_assigned) %}<th>User</th>{% endif %}
           <th style="min-width: 120px;">Time Left</th>
           <th>Task Name</th>
           <th>Task Type</th>
@@ -82,13 +93,13 @@
         {% for row in tasks %}
           {% set t = row.task %}
           <tr>
-            {% if current_user.is_admin and user_filter == 0 %}<td>{{ t.user.username }}</td>{% endif %}
+            {% if (current_user.is_admin and user_filter == 0) or ((not current_user.is_admin) and include_assigned) %}<td>{{ t.user.username }}</td>{% endif %}
             <td class="time-left-cell {{ row.time_left_class }}">
               <div class="fw-semibold">{{ row.time_left }}</div>
               <div class="small text-muted">Due {{ t.due_date_utc|dt_local }}</div>
             </td>
             <td>
-              <div class="fw-semibold">{{ t.name }}</div>
+              <div class="fw-semibold">{% if t.parent_task_id %}&#8627;&nbsp;{% endif %}{{ t.name }}</div>
               {% if t.description %}<div class="small text-muted">{{ t.description | linkify }}</div>{% endif %}
               {% if t.url %}<div class="small"><a href="{{ t.url }}" target="_blank" rel="noopener">{{ t.url }}</a></div>{% endif %}
             </td>
