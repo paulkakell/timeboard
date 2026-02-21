@@ -47,11 +47,13 @@ def get_email(db: Session = Depends(get_db), admin=Depends(require_admin_api)):
     s = get_email_settings(db)
     return AdminEmailSettingsOut(
         enabled=bool(s.enabled),
+        provider=str(getattr(s, "provider", "smtp") or "smtp"),
         smtp_host=str(s.smtp_host),
         smtp_port=int(s.smtp_port),
         smtp_username=str(s.smtp_username),
         smtp_from=str(s.smtp_from),
         use_tls=bool(s.use_tls),
+        sendgrid_api_key_set=bool(getattr(s, "sendgrid_api_key", "") or ""),
         reminder_interval_minutes=int(s.reminder_interval_minutes),
         reset_token_minutes=int(s.reset_token_minutes),
         smtp_password_set=bool(s.smtp_password),
@@ -60,30 +62,55 @@ def get_email(db: Session = Depends(get_db), admin=Depends(require_admin_api)):
 
 @router.put("/email", response_model=AdminEmailSettingsOut)
 def update_email(payload: AdminEmailSettingsUpdate, db: Session = Depends(get_db), admin=Depends(require_admin_api)):
+    cur = get_email_settings(db)
+
+    enabled = bool(payload.enabled) if payload.enabled is not None else bool(cur.enabled)
+    provider = str(payload.provider).strip() if payload.provider is not None else str(getattr(cur, "provider", "smtp"))
+    smtp_host = str(payload.smtp_host) if payload.smtp_host is not None else str(cur.smtp_host)
+    smtp_port = int(payload.smtp_port) if payload.smtp_port is not None else int(cur.smtp_port)
+    smtp_username = str(payload.smtp_username) if payload.smtp_username is not None else str(cur.smtp_username)
+    smtp_from = str(payload.smtp_from) if payload.smtp_from is not None else str(cur.smtp_from)
+    use_tls = bool(payload.use_tls) if payload.use_tls is not None else bool(cur.use_tls)
+    reminder_interval_minutes = (
+        int(payload.reminder_interval_minutes)
+        if payload.reminder_interval_minutes is not None
+        else int(cur.reminder_interval_minutes)
+    )
+    reset_token_minutes = int(payload.reset_token_minutes) if payload.reset_token_minutes is not None else int(cur.reset_token_minutes)
+
     smtp_password = payload.smtp_password
     if isinstance(smtp_password, str) and not smtp_password.strip():
         smtp_password = None
 
+    sendgrid_api_key = payload.sendgrid_api_key
+    if isinstance(sendgrid_api_key, str) and not sendgrid_api_key.strip():
+        sendgrid_api_key = None
+
     saved = set_email_settings(
         db,
-        enabled=payload.enabled,
-        smtp_host=payload.smtp_host,
-        smtp_port=payload.smtp_port,
-        smtp_username=payload.smtp_username,
+        enabled=enabled,
+        provider=provider,
+        smtp_host=smtp_host,
+        smtp_port=smtp_port,
+        smtp_username=smtp_username,
         smtp_password=smtp_password,
-        smtp_from=payload.smtp_from,
-        use_tls=payload.use_tls,
-        reminder_interval_minutes=payload.reminder_interval_minutes,
-        reset_token_minutes=payload.reset_token_minutes,
+        smtp_from=smtp_from,
+        use_tls=use_tls,
+        sendgrid_api_key=sendgrid_api_key,
+        reminder_interval_minutes=reminder_interval_minutes,
+        reset_token_minutes=reset_token_minutes,
         keep_existing_password=bool(payload.keep_existing_password),
+        keep_existing_sendgrid_api_key=bool(payload.keep_existing_sendgrid_api_key),
     )
     return AdminEmailSettingsOut(
         enabled=bool(saved.enabled),
+        provider=str(getattr(saved, "provider", "smtp") or "smtp"),
         smtp_host=str(saved.smtp_host),
         smtp_port=int(saved.smtp_port),
         smtp_username=str(saved.smtp_username),
         smtp_from=str(saved.smtp_from),
         use_tls=bool(saved.use_tls),
+        sendgrid_api_key_set=bool(getattr(saved, "sendgrid_api_key", "") or ""),
         reminder_interval_minutes=int(saved.reminder_interval_minutes),
         reset_token_minutes=int(saved.reset_token_minutes),
         smtp_password_set=bool(saved.smtp_password),

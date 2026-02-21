@@ -47,6 +47,7 @@ from ..db_admin import (
     export_db_json,
     get_auto_backup_settings,
     import_db_json,
+    purge_all_data,
     set_auto_backup_settings,
     validate_import_payload,
 )
@@ -116,6 +117,122 @@ settings = get_settings()
 logger = logging.getLogger("timeboard.ui")
 
 
+# Session key for remembering dashboard filter state.
+DASHBOARD_FILTERS_SESSION_KEY = "dashboard_filters"
+
+
+def _merge_stateful_dashboard_filters(
+    *,
+    query_params,
+    existing_state: dict | None,
+    is_admin: bool,
+    current_user_id: int,
+) -> tuple[dict, dict]:
+    """Merge dashboard filters from query params with a prior session state.
+
+    Goal: dashboard filters stay "sticky" across navigation until explicitly
+    reset.
+
+    Rules:
+      - If a filter appears in query_params, it overwrites the stored value.
+      - Missing filters fall back to stored values.
+      - Blank strings clear a filter.
+      - Page number is intentionally not stored.
+    """
+
+    state: dict = dict(existing_state or {}) if isinstance(existing_state, dict) else {}
+
+    def _has(name: str) -> bool:
+        try:
+            return name in query_params
+        except Exception:
+            return False
+
+    def _get(name: str) -> str:
+        try:
+            return str(query_params.get(name) or "")
+        except Exception:
+            return ""
+
+    def _norm_str(v: str) -> str | None:
+        s = str(v or "").strip()
+        return s if s else None
+
+    # Tag
+    if _has("tag"):
+        state["tag"] = _norm_str(_get("tag"))
+
+    # Task type
+    if _has("task_type"):
+        state["task_type"] = _norm_str(_get("task_type"))
+
+    # Sort
+    if _has("sort"):
+        # Blank sort resets to default.
+        state["sort"] = _norm_str(_get("sort"))
+
+    # Page size
+    if _has("page_size"):
+        raw = _get("page_size")
+        try:
+            state["page_size"] = int(raw)
+        except Exception:
+            # Ignore bad values; keep existing/default.
+            pass
+
+    # Admin view selector (user_id)
+    if is_admin and _has("user_id"):
+        raw = _get("user_id")
+        try:
+            state["user_id"] = int(raw)
+        except Exception:
+            # Ignore bad values; keep existing/default.
+            pass
+
+    # Defaults
+    tag = state.get("tag")
+    task_type = state.get("task_type")
+    sort = state.get("sort") or "due_date"
+
+    try:
+        ps = int(state.get("page_size") or 10)
+    except Exception:
+        ps = 10
+
+    # Keep page size bounded to expected values.
+    allowed_page_sizes = {10, 25, 50, 100, 200}
+    if ps not in allowed_page_sizes:
+        ps = 10
+
+    selected_user_id: int | None = None
+    if is_admin:
+        try:
+            selected_user_id = int(state.get("user_id")) if state.get("user_id") is not None else None
+        except Exception:
+            selected_user_id = None
+        if selected_user_id is None:
+            selected_user_id = int(current_user_id)
+
+    # Normalize what we persist back into the session.
+    new_state = {
+        "tag": tag,
+        "task_type": task_type,
+        "sort": sort,
+        "page_size": ps,
+    }
+    if is_admin:
+        new_state["user_id"] = int(selected_user_id) if selected_user_id is not None else int(current_user_id)
+
+    effective = {
+        "tag": tag,
+        "task_type": task_type,
+        "sort": sort,
+        "page_size": ps,
+        "user_id": selected_user_id,
+    }
+    return effective, new_state
+
+
 
 def _get_current_user(request: Request, db: Session) -> Optional[User]:
     user_id = request.session.get("user_id")
@@ -161,6 +278,22 @@ def _base_url_for_email(request: Request) -> str:
 def _template_context(request: Request, user: Optional[User], db: Session | None = None, **extra) -> dict:
     report = getattr(request.app.state, "db_migration_report", None)
 
+    # Database migration notice: show the applied steps only once (after a real
+    # upgrade) so the dismissible alert in base.html doesn't reappear on every
+    # page.
+    applied_steps: list[str] = []
+    try:
+        applied_steps = list(getattr(report, "applied_steps", []) or [])
+    except Exception:
+        applied_steps = []
+
+    # Only clear the global report after an admin has had a chance to see it.
+    if user and getattr(user, "is_admin", False) and applied_steps:
+        try:
+            report.applied_steps = []
+        except Exception:
+            pass
+
     # Provide user list for admin navigation dropdowns when a DB session is available.
     if user and getattr(user, "is_admin", False) and "nav_users" not in extra and db is not None:
         try:
@@ -194,7 +327,7 @@ def _template_context(request: Request, user: Optional[User], db: Session | None
         "site_mode": _site_mode(request),
         "db_version": getattr(report, "current_db_version", None),
         "db_previous_version": getattr(report, "previous_db_version", None),
-        "db_upgrade_steps": getattr(report, "applied_steps", []),
+        "db_upgrade_steps": applied_steps,
         **extra,
     }
 
@@ -502,24 +635,45 @@ def dashboard(
     user_id: int | None = None,
     task_type: str | None = None,
     sort: str | None = None,
+    reset: int | None = None,
     page: int | None = 1,
-    page_size: int | None = 25,
+    page_size: int | None = 10,
     db: Session = Depends(get_db),
 ):
     user = _get_current_user(request, db)
     if not user:
         return _redirect("/login")
 
+    # Stateful dashboard filters: if no query params are provided, fall back to
+    # the last-used filter state stored in the session. Explicit reset clears.
+    if reset:
+        request.session.pop(DASHBOARD_FILTERS_SESSION_KEY, None)
+
+    effective_filters, new_state = _merge_stateful_dashboard_filters(
+        query_params=request.query_params,
+        existing_state=request.session.get(DASHBOARD_FILTERS_SESSION_KEY),
+        is_admin=bool(user.is_admin),
+        current_user_id=int(user.id),
+    )
+    request.session[DASHBOARD_FILTERS_SESSION_KEY] = new_state
+
+    tag = effective_filters.get("tag")
+    task_type = effective_filters.get("task_type")
+    sort = effective_filters.get("sort")
+    page_size = effective_filters.get("page_size")
+    # Admin view selector (0 = all tasks); non-admin ignores.
+    user_id = effective_filters.get("user_id") if user.is_admin else None
+
     effective_user_id = _effective_user_filter(user, user_id)
 
     # Pagination (dashboard only)
-    allowed_page_sizes = [25, 50, 100, 200]
+    allowed_page_sizes = [10, 25, 50, 100, 200]
     try:
-        ps = int(page_size or 25)
+        ps = int(page_size or 10)
     except Exception:
-        ps = 25
+        ps = 10
     if ps not in allowed_page_sizes:
-        ps = 25
+        ps = 10
 
     try:
         pnum = int(page or 1)
@@ -1992,6 +2146,114 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
     return _redirect("/login?success=import")
 
 
+@router.post("/admin/database/purge-all", response_class=HTMLResponse)
+def admin_database_purge_all(
+    request: Request,
+    confirm: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+    if not user.is_admin:
+        return _redirect("/dashboard")
+
+    cfg = get_auto_backup_settings(db)
+    freq_options = [
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+        ("12h", "Every 12 hours"),
+        ("6h", "Every 6 hours"),
+        ("hourly", "Hourly"),
+        ("disabled", "Disabled"),
+    ]
+
+    backup_dir = Path("/data/backups")
+    backup_count = 0
+    latest_backup = None
+    try:
+        if backup_dir.exists() and backup_dir.is_dir():
+            files = [p for p in backup_dir.glob("*.json") if p.is_file() and not p.name.startswith(".")]
+            backup_count = len(files)
+            if files:
+                newest = max(files, key=lambda p: p.stat().st_mtime)
+                latest_backup = {
+                    "name": newest.name,
+                    "mtime_utc": datetime.utcfromtimestamp(newest.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                }
+    except Exception:
+        backup_count = 0
+        latest_backup = None
+
+    # Require explicit confirmation.
+    if (confirm or "").strip().upper() != "PURGE":
+        return templates.TemplateResponse(
+            "db_admin.html",
+            _template_context(
+                request,
+                user,
+                db=db,
+                error="Confirmation required. Type PURGE to confirm.",
+                success=None,
+                auto_backup_frequency=str(cfg.get("frequency") or "daily"),
+                auto_backup_retention_days=int(cfg.get("retention_days") or 0),
+                auto_backup_frequency_options=freq_options,
+                backup_dir=str(backup_dir),
+                backup_count=backup_count,
+                latest_backup=latest_backup,
+            ),
+            status_code=400,
+        )
+
+    # Create a pre-purge backup for safety.
+    warnings: list[str] = []
+    try:
+        bdb = SessionLocal()
+        try:
+            backup_path = backup_database_json(bdb, prefix="PURGE")
+            warnings.append(f"Pre-purge backup created: {backup_path.name}")
+        finally:
+            bdb.close()
+    except Exception:
+        logger.exception("Failed to create pre-purge PURGE backup")
+
+    err: str | None = None
+    ok: str | None = None
+    try:
+        counts = purge_all_data(db, preserve_users=True, preserve_app_meta=True)
+        ok = (
+            "Purge complete. "
+            f"Deleted tasks={counts.get('tasks', 0)}, tags={counts.get('tags', 0)}, "
+            f"notification_events={counts.get('notification_events', 0)}, "
+            f"notification_services={counts.get('user_notification_services', 0)}."
+        )
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        err = str(e)
+
+    return templates.TemplateResponse(
+        "db_admin.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            error=err,
+            warnings=warnings,
+            success=ok,
+            auto_backup_frequency=str(cfg.get("frequency") or "daily"),
+            auto_backup_retention_days=int(cfg.get("retention_days") or 0),
+            auto_backup_frequency_options=freq_options,
+            backup_dir=str(backup_dir),
+            backup_count=backup_count,
+            latest_backup=latest_backup,
+        ),
+        status_code=200 if not err else 400,
+    )
+
+
 @router.get("/admin/email", response_class=HTMLResponse)
 def admin_email_get(request: Request, db: Session = Depends(get_db)):
     user = _get_current_user(request, db)
@@ -2020,12 +2282,14 @@ async def admin_email_post(request: Request, db: Session = Depends(get_db)):
 
     form = await request.form()
     enabled = form.get("enabled") == "on"
+    provider = str(form.get("provider") or "smtp")
     smtp_host = str(form.get("smtp_host") or "")
     smtp_port = int(form.get("smtp_port") or 587)
     smtp_username = str(form.get("smtp_username") or "")
     smtp_password = str(form.get("smtp_password") or "")
     smtp_from = str(form.get("smtp_from") or "")
     use_tls = form.get("use_tls") == "on"
+    sendgrid_api_key = str(form.get("sendgrid_api_key") or "")
     reminder_interval_minutes = int(form.get("reminder_interval_minutes") or 60)
     reset_token_minutes = int(form.get("reset_token_minutes") or 60)
 
@@ -2034,19 +2298,27 @@ async def admin_email_post(request: Request, db: Session = Depends(get_db)):
     if clear_password:
         smtp_password = ""
 
+    clear_sendgrid_api_key = form.get("clear_sendgrid_api_key") == "on"
+    keep_existing_sendgrid_api_key = (not clear_sendgrid_api_key) and (sendgrid_api_key.strip() == "")
+    if clear_sendgrid_api_key:
+        sendgrid_api_key = ""
+
     try:
         cfg = set_email_settings(
             db,
             enabled=enabled,
+            provider=provider,
             smtp_host=smtp_host,
             smtp_port=smtp_port,
             smtp_username=smtp_username,
             smtp_password=smtp_password,
             smtp_from=smtp_from,
             use_tls=use_tls,
+            sendgrid_api_key=sendgrid_api_key,
             reminder_interval_minutes=reminder_interval_minutes,
             reset_token_minutes=reset_token_minutes,
             keep_existing_password=keep_existing_password,
+            keep_existing_sendgrid_api_key=keep_existing_sendgrid_api_key,
         )
         # Reconfigure reminder jobs immediately.
         cfg_fn = getattr(request.app.state, "configure_email_jobs", None)

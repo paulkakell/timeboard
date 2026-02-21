@@ -107,39 +107,51 @@ def _set_json(db: Session, key: str, value: dict) -> None:
 
 
 EMAIL_ENABLED_KEY = "email.enabled"
+EMAIL_PROVIDER_KEY = "email.provider"
 EMAIL_SMTP_HOST_KEY = "email.smtp_host"
 EMAIL_SMTP_PORT_KEY = "email.smtp_port"
 EMAIL_SMTP_USERNAME_KEY = "email.smtp_username"
 EMAIL_SMTP_PASSWORD_KEY = "email.smtp_password"
 EMAIL_SMTP_FROM_KEY = "email.smtp_from"
 EMAIL_USE_TLS_KEY = "email.use_tls"
+EMAIL_SENDGRID_API_KEY_KEY = "email.sendgrid_api_key"
 EMAIL_REMINDER_INTERVAL_MINUTES_KEY = "email.reminder_interval_minutes"
 EMAIL_RESET_TOKEN_MINUTES_KEY = "email.reset_token_minutes"
+
+
+EMAIL_PROVIDERS = {"smtp", "sendgrid"}
 
 
 @dataclass
 class EmailConfig:
     enabled: bool = False
+    provider: str = "smtp"  # smtp | sendgrid
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_from: str = "timeboard@localhost"
     use_tls: bool = True
+    sendgrid_api_key: str = ""
     reminder_interval_minutes: int = 60
     reset_token_minutes: int = 60
 
 
 def get_email_settings(db: Session) -> EmailConfig:
     """Read email settings from app_meta."""
+    provider = _get_str(db, EMAIL_PROVIDER_KEY, "smtp").strip().lower() or "smtp"
+    if provider not in EMAIL_PROVIDERS:
+        provider = "smtp"
     return EmailConfig(
         enabled=_get_bool(db, EMAIL_ENABLED_KEY, False),
+        provider=provider,
         smtp_host=_get_str(db, EMAIL_SMTP_HOST_KEY, "").strip(),
         smtp_port=_get_int(db, EMAIL_SMTP_PORT_KEY, 587, min_value=1, max_value=65535),
         smtp_username=_get_str(db, EMAIL_SMTP_USERNAME_KEY, ""),
         smtp_password=_get_str(db, EMAIL_SMTP_PASSWORD_KEY, ""),
         smtp_from=_get_str(db, EMAIL_SMTP_FROM_KEY, "timeboard@localhost"),
         use_tls=_get_bool(db, EMAIL_USE_TLS_KEY, True),
+        sendgrid_api_key=_get_str(db, EMAIL_SENDGRID_API_KEY_KEY, ""),
         reminder_interval_minutes=_get_int(
             db,
             EMAIL_REMINDER_INTERVAL_MINUTES_KEY,
@@ -161,15 +173,18 @@ def set_email_settings(
     db: Session,
     *,
     enabled: bool,
+    provider: str,
     smtp_host: str,
     smtp_port: int,
     smtp_username: str,
     smtp_password: str | None,
     smtp_from: str,
     use_tls: bool,
+    sendgrid_api_key: str | None,
     reminder_interval_minutes: int,
     reset_token_minutes: int,
     keep_existing_password: bool = False,
+    keep_existing_sendgrid_api_key: bool = False,
 ) -> EmailConfig:
     """Persist email settings to app_meta.
 
@@ -179,6 +194,10 @@ def set_email_settings(
 
     host = (smtp_host or "").strip()
     from_addr = (smtp_from or "").strip() or "timeboard@localhost"
+
+    prov = (provider or "").strip().lower() or "smtp"
+    if prov not in EMAIL_PROVIDERS:
+        raise ValueError("provider must be one of: smtp, sendgrid")
 
     try:
         port = int(smtp_port)
@@ -202,6 +221,7 @@ def set_email_settings(
         raise ValueError("reset_token_minutes must be between 5 and 10080")
 
     _set_meta_value(db, EMAIL_ENABLED_KEY, "true" if bool(enabled) else "false")
+    _set_meta_value(db, EMAIL_PROVIDER_KEY, prov)
     _set_meta_value(db, EMAIL_SMTP_HOST_KEY, host)
     _set_meta_value(db, EMAIL_SMTP_PORT_KEY, str(port))
     _set_meta_value(db, EMAIL_SMTP_USERNAME_KEY, str(smtp_username or ""))
@@ -215,6 +235,13 @@ def set_email_settings(
 
     _set_meta_value(db, EMAIL_SMTP_FROM_KEY, from_addr)
     _set_meta_value(db, EMAIL_USE_TLS_KEY, "true" if bool(use_tls) else "false")
+
+    sg = "" if sendgrid_api_key is None else str(sendgrid_api_key)
+    if keep_existing_sendgrid_api_key and not sg:
+        pass
+    else:
+        _set_meta_value(db, EMAIL_SENDGRID_API_KEY_KEY, sg)
+
     _set_meta_value(db, EMAIL_REMINDER_INTERVAL_MINUTES_KEY, str(rem))
     _set_meta_value(db, EMAIL_RESET_TOKEN_MINUTES_KEY, str(ttl))
     db.commit()
@@ -234,12 +261,14 @@ def seed_email_settings_from_legacy_yaml(db: Session, legacy_email: Any) -> None
 
     keys = [
         EMAIL_ENABLED_KEY,
+        EMAIL_PROVIDER_KEY,
         EMAIL_SMTP_HOST_KEY,
         EMAIL_SMTP_PORT_KEY,
         EMAIL_SMTP_USERNAME_KEY,
         EMAIL_SMTP_PASSWORD_KEY,
         EMAIL_SMTP_FROM_KEY,
         EMAIL_USE_TLS_KEY,
+        EMAIL_SENDGRID_API_KEY_KEY,
         EMAIL_REMINDER_INTERVAL_MINUTES_KEY,
         EMAIL_RESET_TOKEN_MINUTES_KEY,
     ]
@@ -249,23 +278,29 @@ def seed_email_settings_from_legacy_yaml(db: Session, legacy_email: Any) -> None
         return
 
     enabled = bool(getattr(legacy_email, "enabled", False))
+    provider = str(getattr(legacy_email, "provider", "smtp") or "smtp").strip().lower() or "smtp"
+    if provider not in EMAIL_PROVIDERS:
+        provider = "smtp"
     smtp_host = str(getattr(legacy_email, "smtp_host", "") or "")
     smtp_port = int(getattr(legacy_email, "smtp_port", 587) or 587)
     smtp_username = str(getattr(legacy_email, "smtp_username", "") or "")
     smtp_password = str(getattr(legacy_email, "smtp_password", "") or "")
     smtp_from = str(getattr(legacy_email, "smtp_from", "timeboard@localhost") or "timeboard@localhost")
     use_tls = bool(getattr(legacy_email, "use_tls", True))
+    sendgrid_api_key = str(getattr(legacy_email, "sendgrid_api_key", "") or "")
     reminder_interval_minutes = int(getattr(legacy_email, "reminder_interval_minutes", 60) or 60)
     reset_token_minutes = int(getattr(legacy_email, "reset_token_minutes", 60) or 60)
 
     defaults: Dict[str, str] = {
         EMAIL_ENABLED_KEY: "true" if enabled else "false",
+        EMAIL_PROVIDER_KEY: provider,
         EMAIL_SMTP_HOST_KEY: smtp_host,
         EMAIL_SMTP_PORT_KEY: str(smtp_port),
         EMAIL_SMTP_USERNAME_KEY: smtp_username,
         EMAIL_SMTP_PASSWORD_KEY: smtp_password,
         EMAIL_SMTP_FROM_KEY: smtp_from,
         EMAIL_USE_TLS_KEY: "true" if use_tls else "false",
+        EMAIL_SENDGRID_API_KEY_KEY: sendgrid_api_key,
         EMAIL_REMINDER_INTERVAL_MINUTES_KEY: str(reminder_interval_minutes),
         EMAIL_RESET_TOKEN_MINUTES_KEY: str(reset_token_minutes),
     }

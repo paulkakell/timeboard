@@ -16,6 +16,7 @@ from .config import get_settings
 from .crud import create_user, purge_archived_tasks
 from .db_admin import backup_database_json, get_auto_backup_settings, purge_backup_files
 from .db import Base, SessionLocal, engine
+from .demo_data import seed_demo_data
 from .emailer import build_overdue_reminder_email, email_enabled, send_email
 from .logging_setup import apply_log_level, purge_old_logs, setup_logging
 from .meta_settings import (
@@ -26,7 +27,7 @@ from .meta_settings import (
 )
 from .migrations import ensure_db_schema
 from .models import Task, TaskStatus, User
-from .notifications import EVENT_PAST_DUE, notify_task_event
+from .notifications import EVENT_PAST_DUE, notify_task_event, shutdown_notification_dispatcher
 from .routers import api_admin, api_auth, api_notifications, api_tags, api_tasks, api_users, ui
 from .utils.time_utils import format_dt_display, to_local
 from .version import APP_VERSION
@@ -84,16 +85,25 @@ def _configure_email_jobs(app: FastAPI, sched: BackgroundScheduler) -> None:
     # Store current config snapshot for UI rendering/debug.
     app.state.email_config = {
         "enabled": bool(cfg.enabled),
+        "provider": str(getattr(cfg, "provider", "smtp") or "smtp"),
         "smtp_host": str(cfg.smtp_host or ""),
         "smtp_port": int(cfg.smtp_port),
         "smtp_username": str(cfg.smtp_username or ""),
         "smtp_from": str(cfg.smtp_from or ""),
         "use_tls": bool(cfg.use_tls),
+        "sendgrid_api_key_set": bool(getattr(cfg, "sendgrid_api_key", "") or ""),
         "reminder_interval_minutes": int(cfg.reminder_interval_minutes),
         "reset_token_minutes": int(cfg.reset_token_minutes),
     }
 
-    if not cfg.enabled or not cfg.smtp_host or int(cfg.reminder_interval_minutes) <= 0:
+    provider = str(getattr(cfg, "provider", "smtp") or "smtp").strip().lower() or "smtp"
+    is_configured = False
+    if provider == "sendgrid":
+        is_configured = bool(str(getattr(cfg, "sendgrid_api_key", "") or "").strip())
+    else:
+        is_configured = bool(str(cfg.smtp_host or "").strip())
+
+    if (not cfg.enabled) or (not is_configured) or int(cfg.reminder_interval_minutes) <= 0:
         return
 
     def _reminder_job() -> None:
@@ -415,6 +425,16 @@ def _public_base_url() -> str:
 def on_startup() -> None:
     global scheduler
 
+    # Detect a fresh install before SQLAlchemy creates the SQLite DB file.
+    is_fresh_db_file = False
+    try:
+        if str(getattr(engine, "dialect", None).name or "").lower() == "sqlite":
+            db_file = getattr(getattr(engine, "url", None), "database", None)
+            if db_file and str(db_file) != ":memory:":
+                is_fresh_db_file = not Path(str(db_file)).exists()
+    except Exception:
+        is_fresh_db_file = False
+
     # Ensure DB tables exist.
     Base.metadata.create_all(bind=engine)
 
@@ -446,6 +466,17 @@ def on_startup() -> None:
             logger.warning("Password: %s", admin_password)
             logger.warning("Please log in and change this password.")
             logger.warning("============================================================")
+
+        # Seed demo tasks/tags for true first-run installs.
+        if is_fresh_db_file:
+            try:
+                admin_user = db.query(User).filter(User.username == "admin").first() or db.query(User).first()
+                if admin_user:
+                    result = seed_demo_data(db, owner=admin_user)
+                    if result.get("seeded"):
+                        logger.info("Seeded demo data (tasks_created=%s)", result.get("tasks_created"))
+            except Exception:
+                logger.exception("Failed to seed demo data")
     finally:
         db.close()
 
@@ -509,6 +540,9 @@ def on_shutdown() -> None:
     if scheduler:
         scheduler.shutdown(wait=False)
         scheduler = None
+
+    # Best-effort stop of background notification workers.
+    shutdown_notification_dispatcher()
 
 
 @app.get("/", include_in_schema=False)

@@ -1,6 +1,53 @@
 # Changelog
 
 
+## 00.07.00
+
+- Additive: First-run installs now seed a small set of demo tasks/tags for the initial admin account (only when the SQLite DB file did not exist before startup).
+- Additive: Admin → Database now includes a "Purge All" action to permanently delete tasks, tags, and notification-related data (user accounts + admin settings are preserved). A pre-purge JSON backup is written to `/data/backups`.
+- Fix: Gotify notifications now authenticate using the `X-Gotify-Key` header instead of `?token=...` query params (improves compatibility with reverse proxies/WAFs and avoids leaking tokens in URLs).
+
+Compatibility: Backward compatible.
+
+Refs: Issue N/A, Commit N/A
+
+
+## 00.06.00
+
+- Additive: Email can now be delivered via SendGrid API (v3) as an alternative to SMTP. Configurable in Admin → Email and via the Admin email settings API.
+- Fix: Admin email settings API now supports partial updates consistently (mirrors the logging/WNS admin endpoints behavior).
+
+Compatibility: Backward compatible.
+
+Refs: Issue N/A, Commit N/A
+
+
+## 00.05.01
+
+- Fix: Email (SMTP) delivery failures now include host/port/timeout context (and a Docker/localhost hint) in logs and notification event delivery errors to make configuration and networking issues easier to diagnose.
+
+Compatibility: Backward compatible.
+
+Refs: Issue N/A, Commit N/A
+
+
+## 00.05.00
+
+- Additive: Asynchronous delivery for all non-browser notification services (email, gotify, ntfy, discord, webhook, generic_api, wns) so task create/update/complete no longer blocks on network calls.
+- Additive: Notification delivery status and error fields are now persisted on `notification_events` and returned by the notifications events API to aid troubleshooting.
+- Fix: Outbound notification HTTP failures now include safe URL context (query stripped) and response snippets, and async worker failures are logged with event/service/user context.
+
+Compatibility: Backward compatible (DB migration is additive).
+
+Refs: Issue N/A, Commit N/A
+
+
+## 00.04.01
+
+- Additive: Dashboard page size default is now 10 (options now include 10, 25, 50, 100, 200).
+
+Compatibility: Backward compatible.
+
 ## 00.04.00
 
 - Fix: Discord webhook notifications now use an embed so the task name is a clickable link to the task entry (when an absolute URL is available via `app.base_url` or a task's `url`).

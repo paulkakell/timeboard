@@ -3,13 +3,19 @@ from __future__ import annotations
 import html
 import json
 import logging
+import queue
+import re
 import secrets
+import threading
+import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from urllib import parse, request
+from urllib.error import HTTPError, URLError
 
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.orm import Session, joinedload, sessionmaker
 
 from .config import get_settings
 from .emailer import send_email
@@ -71,6 +77,23 @@ CHANNEL_TYPES = [
 NOTIFY_TAG_PREFIX = "notify:"
 
 
+# ---- Async delivery status --------------------------------------------------------
+
+DELIVERY_QUEUED = "queued"
+DELIVERY_SENDING = "sending"
+DELIVERY_SENT = "sent"
+DELIVERY_FAILED = "failed"
+DELIVERY_SKIPPED = "skipped"
+
+DELIVERY_STATUSES = {
+    DELIVERY_QUEUED,
+    DELIVERY_SENDING,
+    DELIVERY_SENT,
+    DELIVERY_FAILED,
+    DELIVERY_SKIPPED,
+}
+
+
 def _json_loads(s: str | None) -> dict:
     if not s:
         return {}
@@ -86,6 +109,62 @@ def _json_dumps(obj: dict | None) -> str:
         return json.dumps(obj or {}, separators=(",", ":"), sort_keys=True)
     except Exception:
         return "{}"
+
+
+def _truncate(s: str, n: int) -> str:
+    txt = str(s or "")
+    if len(txt) <= int(n):
+        return txt
+    return txt[: max(0, int(n) - 1)] + "…"
+
+
+def _now_utc_naive() -> datetime:
+    return datetime.utcnow().replace(tzinfo=None)
+
+
+def _safe_url_for_log(url: str) -> str:
+    """Return a log-safe URL string.
+
+    Omits query strings (commonly contain tokens).
+    """
+
+    raw = str(url or "")
+
+    # Redact likely-secret path segments (e.g., Discord webhook tokens which
+    # live in the URL path).
+    tokenish = re.compile(r"^[A-Za-z0-9._~-]{24,}$")
+    hexish = re.compile(r"^[a-fA-F0-9]{32,}$")
+
+    try:
+        p = parse.urlparse(raw)
+        if not (p.scheme and p.netloc):
+            return raw
+
+        path = p.path or ""
+        parts = [seg for seg in path.split("/") if seg]
+        redacted: list[str] = []
+        for seg in parts:
+            if tokenish.match(seg) or hexish.match(seg):
+                redacted.append("<redacted>")
+            else:
+                redacted.append(seg)
+
+        safe_path = ("/" + "/".join(redacted)) if path.startswith("/") else "/".join(redacted)
+        safe = f"{p.scheme}://{p.netloc}{safe_path}"
+        return _truncate(safe, 200)
+    except Exception:
+        return _truncate(raw, 200)
+
+
+def _format_exception(e: Exception, *, max_len: int = 800) -> str:
+    name = type(e).__name__
+    msg = ""
+    try:
+        msg = str(e)
+    except Exception:
+        msg = ""
+    base = f"{name}: {msg}" if msg else name
+    return _truncate(base, int(max_len))
 
 
 def _normalize_service_type(service_type: str) -> str:
@@ -186,6 +265,7 @@ def _build_task_notification(*, task: Task, event_type: str) -> tuple[str, str, 
         "message_text": message_text,
         "message_html": message_html,
         "url": link_url,
+        "due_date_display": due,
         "task": {
             "id": int(task.id) if getattr(task, "id", None) is not None else None,
             "user_id": int(task.user_id) if getattr(task, "user_id", None) is not None else None,
@@ -402,15 +482,48 @@ def _http_request(
     data: bytes | None = None,
     timeout: int = 10,
 ) -> tuple[int, str]:
+    # Only allow network calls over HTTP(S). This prevents accidental use of
+    # file:/ or other custom schemes when notification URLs are user-provided.
+    parsed = parse.urlparse(str(url))
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Invalid notification URL")
+
     hdrs = {"User-Agent": "Timeboard"}
     if headers:
         for k, v in headers.items():
             if k and v is not None:
                 hdrs[str(k)] = str(v)
     req = request.Request(url=str(url), data=data, headers=hdrs, method=str(method).upper())
-    with request.urlopen(req, timeout=timeout) as resp:
-        body = resp.read() or b""
-        return int(getattr(resp, "status", 200)), body.decode("utf-8", errors="replace")
+
+    safe_url = _safe_url_for_log(str(url))
+    try:
+        with request.urlopen(req, timeout=timeout) as resp:  # nosec B310
+            body = resp.read() or b""
+            status = int(getattr(resp, "status", 200))
+            text = body.decode("utf-8", errors="replace")
+    except HTTPError as e:
+        try:
+            status = int(getattr(e, "code", 0) or 0)
+        except Exception:
+            status = 0
+        try:
+            body = e.read() or b""
+        except Exception:
+            body = b""
+        text = body.decode("utf-8", errors="replace")
+        snippet = _truncate(text.strip(), 300)
+        raise RuntimeError(f"HTTP {status} from {safe_url}: {snippet}") from None
+    except URLError as e:
+        reason = getattr(e, "reason", None)
+        raise RuntimeError(f"Request to {safe_url} failed: {reason or e}") from None
+    except Exception as e:
+        raise RuntimeError(f"Request to {safe_url} failed: {e}") from None
+
+    if status < 200 or status >= 300:
+        snippet = _truncate(text.strip(), 300)
+        raise RuntimeError(f"HTTP {status} from {safe_url}: {snippet}")
+
+    return status, text
 
 
 def _send_gotify(*, config: dict, title: str, message: str) -> None:
@@ -428,10 +541,19 @@ def _send_gotify(*, config: dict, title: str, message: str) -> None:
     if priority > 10:
         priority = 10
 
-    url = f"{base_url}/message?token={parse.quote(token)}"
+    # Prefer auth via header instead of query string so reverse proxies/WAFs
+    # that strip or block sensitive query params do not break delivery.
+    url = f"{base_url}/message"
     payload = {"title": title, "message": message, "priority": priority}
     data = json.dumps(payload).encode("utf-8")
-    _http_request(url=url, headers={"Content-Type": "application/json"}, data=data)
+    _http_request(
+        url=url,
+        headers={
+            "Content-Type": "application/json",
+            "X-Gotify-Key": token,
+        },
+        data=data,
+    )
 
 
 def _send_ntfy(*, config: dict, title: str, message: str, click_url: str | None = None) -> None:
@@ -457,13 +579,136 @@ def _send_ntfy(*, config: dict, title: str, message: str, click_url: str | None 
     _http_request(url=url, headers=headers, data=(message or "").encode("utf-8"))
 
 
-def _send_discord(*, config: dict, message: str) -> None:
-    webhook_url = str(config.get("webhook_url") or "").strip()
+def _send_discord(*, config: dict, message: str | None, embeds: list[dict[str, Any]] | None = None) -> None:
+    """Send a Discord webhook message.
+
+    Discord accepts either `content` and/or `embeds`.
+    """
+
+    # Accept a few legacy/common keys.
+    webhook_url = str(config.get("webhook_url") or config.get("url") or config.get("webhook") or "").strip()
     if not webhook_url:
         raise ValueError("Discord requires webhook_url")
-    payload = {"content": message}
+
+    # Discord webhook content supports Markdown but not HTML.
+    content = str(message or "")
+    if len(content) > 2000:
+        content = content[:1997] + "..."
+
+    payload: dict[str, Any] = {
+        "content": content,
+        # Prevent accidental @mentions from task names/tags.
+        "allowed_mentions": {"parse": []},
+    }
+    if embeds:
+        payload["embeds"] = embeds
+
     data = json.dumps(payload).encode("utf-8")
     _http_request(url=webhook_url, headers={"Content-Type": "application/json"}, data=data)
+
+
+def _build_discord_markdown(*, title: str, payload: dict) -> str:
+    """Build a Discord-friendly Markdown message.
+
+    Discord supports a Markdown-like syntax in message content, but not HTML.
+    """
+
+    action = str(payload.get("change_action") or "").strip() or str(title or "Notification")
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    name = str(task.get("name") or "").strip()
+    task_type = str(task.get("task_type") or "").strip()
+    due_disp = str(payload.get("due_date_display") or "").strip()
+    url = str(payload.get("url") or payload.get("task_internal_url") or "").strip()
+
+    tags_val = payload.get("tags")
+    tags: list[str] = []
+    if isinstance(tags_val, list):
+        tags = [str(t).strip() for t in tags_val if str(t).strip()]
+    tags_str = ", ".join(tags)
+
+    header = f"**{action}**"
+    if task_type:
+        header += f" [{task_type}]"
+    if name:
+        header += f" {name}"
+
+    lines: list[str] = [header.strip()]
+    if url:
+        lines.append(url)
+    if due_disp:
+        lines.append(f"Due: {due_disp}")
+    if tags_str:
+        lines.append(f"Tags: {tags_str}")
+
+    return "\n".join([ln for ln in lines if ln]).strip()
+
+
+def _is_http_url(url: str) -> bool:
+    """Return True when URL is an absolute http(s) URL."""
+    try:
+        p = parse.urlparse(str(url or "").strip())
+        return p.scheme in {"http", "https"} and bool(p.netloc)
+    except Exception:
+        return False
+
+
+def _truncate(s: str, max_len: int) -> str:
+    s2 = str(s or "")
+    if max_len <= 0:
+        return ""
+    if len(s2) <= max_len:
+        return s2
+    if max_len <= 3:
+        return s2[:max_len]
+    return s2[: max_len - 3] + "..."
+
+
+def _build_discord_embeds(*, title: str, payload: dict) -> list[dict[str, Any]]:
+    """Build Discord embeds.
+
+    Primary goal: make the task name a clickable link to the task entry.
+
+    Discord only supports masked links (hyperlinked text) in embeds, not in
+    standard message content.
+    """
+
+    action = str(payload.get("change_action") or "").strip() or str(title or "Notification")
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
+    name = str(task.get("name") or "").strip()
+    task_type = str(task.get("task_type") or "").strip()
+    due_disp = str(payload.get("due_date_display") or "").strip()
+    url = str(payload.get("url") or payload.get("task_internal_url") or "").strip()
+
+    tags_val = payload.get("tags")
+    tags: list[str] = []
+    if isinstance(tags_val, list):
+        tags = [str(t).strip() for t in tags_val if str(t).strip()]
+    tags_str = ", ".join(tags)
+
+    # Only attach an embed URL when it is a valid absolute URL. Discord
+    # rejects invalid URLs at the API layer.
+    if not name or not _is_http_url(url):
+        return []
+
+    desc = f"**{action}**"
+    if task_type:
+        desc += f" [{task_type}]"
+
+    embed: dict[str, Any] = {
+        "title": _truncate(name, 256),
+        "url": url,
+        "description": _truncate(desc, 4096),
+    }
+
+    fields: list[dict[str, Any]] = []
+    if due_disp:
+        fields.append({"name": "Due", "value": _truncate(due_disp, 1024), "inline": True})
+    if tags_str:
+        fields.append({"name": "Tags", "value": _truncate(tags_str, 1024), "inline": False})
+    if fields:
+        embed["fields"] = fields
+
+    return [embed]
 
 
 def _send_webhook(*, config: dict, payload: dict) -> None:
@@ -581,6 +826,11 @@ def create_notification_event(
     event_key: str | None = None,
     service_id: int | None = None,
     service_type: str | None = None,
+    delivery_status: str | None = None,
+    delivery_error: str | None = None,
+    delivery_attempts: int | None = None,
+    last_attempt_at_utc: datetime | None = None,
+    delivered_at_utc: datetime | None = None,
 ) -> NotificationEvent | None:
     et = str(event_type or "").strip().lower()
     if et not in EVENT_TYPES:
@@ -595,6 +845,11 @@ def create_notification_event(
         event_key=(str(event_key) if event_key else None),
         title=str(title or "Notification"),
         message=str(message or ""),
+        delivery_status=(str(delivery_status).strip().lower() if delivery_status else None),
+        delivery_error=(str(delivery_error) if delivery_error else None),
+        delivery_attempts=(int(delivery_attempts) if delivery_attempts is not None else None),
+        last_attempt_at_utc=(last_attempt_at_utc.replace(tzinfo=None) if last_attempt_at_utc else None),
+        delivered_at_utc=(delivered_at_utc.replace(tzinfo=None) if delivered_at_utc else None),
     )
     db.add(ev)
     try:
@@ -619,62 +874,356 @@ def _send_notification_via_service(
     message_html: str | None,
     payload: dict,
 ) -> str:
-    """Send a notification to a single configured service entry."""
+    """Best-effort send wrapper.
+
+    Returns "ok" on success, otherwise "error:...".
+
+    Async delivery uses `_send_notification_via_service_impl` directly so it can
+    attach full context (event_id/user_id/service_id) to logs and persist an
+    error summary into `notification_events`.
+    """
+    st = str(svc.service_type or "").strip().lower()
+    try:
+        _send_notification_via_service_impl(
+            db,
+            svc=svc,
+            user=user,
+            title=title,
+            message_text=message_text,
+            message_html=message_html,
+            payload=payload,
+        )
+        return "ok"
+    except Exception as e:
+        err = _format_exception(e)
+        logger.warning("Notification send failed (%s svc_id=%s): %s", st, getattr(svc, "id", None), err)
+        return f"error:{err}"
+
+
+def _send_notification_via_service_impl(
+    db: Session,
+    *,
+    svc: UserNotificationService,
+    user: User,
+    title: str,
+    message_text: str,
+    message_html: str | None,
+    payload: dict,
+) -> None:
+    """Send a notification to a single configured service entry.
+
+    Raises on failure.
+    """
     st = str(svc.service_type or "").strip().lower()
     cfg = _json_loads(svc.config_json)
 
+    if st == CHANNEL_BROWSER:
+        # Browser notifications are delivered via SSE from NotificationEvent rows.
+        return
+
+    if st == CHANNEL_EMAIL:
+        to_address = str(cfg.get("to_address") or "").strip() or str(getattr(user, "email", "") or "").strip()
+        if not to_address:
+            raise ValueError("No recipient email address")
+        subject = f"Timeboard: {title}"
+        send_email(to_address=to_address, subject=subject, body_text=message_text, body_html=message_html, db=db)
+        return
+
+    if st == CHANNEL_GOTIFY:
+        _send_gotify(config=cfg, title=title, message=message_text)
+        return
+
+    if st == CHANNEL_NTFY:
+        _send_ntfy(config=cfg, title=title, message=message_text, click_url=str(payload.get("url") or "").strip() or None)
+        return
+
+    if st == CHANNEL_DISCORD:
+        embeds = _build_discord_embeds(title=title, payload=payload)
+        if embeds:
+            _send_discord(config=cfg, message="", embeds=embeds)
+        else:
+            md = _build_discord_markdown(title=title, payload=payload)
+            _send_discord(config=cfg, message=md or message_text)
+        return
+
+    if st == CHANNEL_WEBHOOK:
+        _send_webhook(config=cfg, payload=payload)
+        return
+
+    if st == CHANNEL_GENERIC_API:
+        _send_generic_api(config=cfg, payload=payload)
+        return
+
+    if st == CHANNEL_WNS:
+        wns_cfg = get_wns_settings(db)
+        if not wns_cfg.enabled:
+            raise ValueError("WNS is disabled by admin")
+        if not wns_cfg.package_sid or not wns_cfg.client_secret:
+            raise ValueError("WNS is not configured (missing package_sid/client_secret)")
+
+        channel_uri = str(cfg.get("channel_uri") or "").strip()
+        if not channel_uri:
+            raise ValueError("WNS channel_uri not set")
+
+        token = _wns_get_access_token(package_sid=wns_cfg.package_sid, client_secret=wns_cfg.client_secret)
+        _send_wns_toast(channel_uri=channel_uri, access_token=token, title=title, message=message_text)
+        return
+
+    raise ValueError("Unknown notification service_type")
+
+
+def _commit_with_retry(db: Session, *, attempts: int = 5, base_sleep: float = 0.05) -> None:
+    """Commit a transaction with a small retry loop for SQLite lock contention."""
+
+    tries = max(1, int(attempts))
+    delay = float(base_sleep)
+    for i in range(tries):
+        try:
+            db.commit()
+            return
+        except OperationalError:
+            db.rollback()
+            if i >= tries - 1:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2.0, 1.0)
+
+
+def _session_engine(db: Session):
+    """Return an Engine for the provided Session.
+
+    Avoid passing a live Connection across threads.
+    """
+
+    bind = getattr(db, "bind", None) or db.get_bind()
     try:
-        if st == CHANNEL_BROWSER:
-            # Browser notifications are delivered via SSE from NotificationEvent rows.
-            return "ok"
+        # If bind is a Connection, prefer its engine.
+        eng = getattr(bind, "engine", None)
+        return eng or bind
+    except Exception:
+        return bind
 
-        if st == CHANNEL_EMAIL:
-            to_address = str(cfg.get("to_address") or "").strip() or str(getattr(user, "email", "") or "").strip()
-            if not to_address:
-                raise ValueError("No recipient email address")
-            subject = f"Timeboard: {title}"
-            send_email(to_address=to_address, subject=subject, body_text=message_text, body_html=message_html, db=db)
-            return "ok"
 
-        if st == CHANNEL_GOTIFY:
-            _send_gotify(config=cfg, title=title, message=message_text)
-            return "ok"
+@dataclass(frozen=True)
+class _NotificationSendJob:
+    engine: Any
+    event_id: int
+    user_id: int
+    task_id: int | None
+    service_id: int | None
+    service_type: str
+    title: str
+    message_text: str
+    message_html: str | None
+    payload: dict
+    # For legacy channel sends only.
+    legacy_config_json: str | None = None
 
-        if st == CHANNEL_NTFY:
-            _send_ntfy(config=cfg, title=title, message=message_text, click_url=str(payload.get("url") or "").strip() or None)
-            return "ok"
 
-        if st == CHANNEL_DISCORD:
-            _send_discord(config=cfg, message=message_text)
-            return "ok"
+class _AsyncNotificationDispatcher:
+    def __init__(self, *, max_workers: int = 4, queue_size: int = 1000):
+        self._q: queue.Queue[_NotificationSendJob | None] = queue.Queue(maxsize=int(queue_size))
+        self._stop = threading.Event()
+        self._threads: list[threading.Thread] = []
 
-        if st == CHANNEL_WEBHOOK:
-            _send_webhook(config=cfg, payload=payload)
-            return "ok"
+        n = max(1, int(max_workers))
+        for i in range(n):
+            t = threading.Thread(
+                target=self._worker,
+                name=f"timeboard-notify-{i}",
+                daemon=True,
+            )
+            t.start()
+            self._threads.append(t)
 
-        if st == CHANNEL_GENERIC_API:
-            _send_generic_api(config=cfg, payload=payload)
-            return "ok"
+    def submit(self, job: _NotificationSendJob) -> bool:
+        if self._stop.is_set():
+            return False
+        try:
+            self._q.put(job, block=False)
+            return True
+        except queue.Full:
+            return False
 
-        if st == CHANNEL_WNS:
-            wns_cfg = get_wns_settings(db)
-            if not wns_cfg.enabled:
-                raise ValueError("WNS is disabled by admin")
-            if not wns_cfg.package_sid or not wns_cfg.client_secret:
-                raise ValueError("WNS is not configured (missing package_sid/client_secret)")
+    def shutdown(self) -> None:
+        self._stop.set()
+        # Best-effort stop signals.
+        for _ in self._threads:
+            try:
+                self._q.put_nowait(None)
+            except Exception:
+                break
 
-            channel_uri = str(cfg.get("channel_uri") or "").strip()
-            if not channel_uri:
-                raise ValueError("WNS channel_uri not set")
+    def wait_for_idle(self, *, timeout: float = 5.0) -> bool:
+        """Best-effort drain for tests."""
 
-            token = _wns_get_access_token(package_sid=wns_cfg.package_sid, client_secret=wns_cfg.client_secret)
-            _send_wns_toast(channel_uri=channel_uri, access_token=token, title=title, message=message_text)
-            return "ok"
+        end = time.monotonic() + float(timeout)
+        while time.monotonic() < end:
+            try:
+                if int(getattr(self._q, "unfinished_tasks", 0)) == 0:
+                    return True
+            except Exception:
+                return True
+            time.sleep(0.05)
+        try:
+            return int(getattr(self._q, "unfinished_tasks", 0)) == 0
+        except Exception:
+            return True
 
-        return "error:unknown-service"
-    except Exception as e:
-        logger.warning("Notification send failed (%s svc_id=%s): %s", st, getattr(svc, "id", None), e)
-        return f"error:{e}"
+    def _worker(self) -> None:
+        while not self._stop.is_set():
+            try:
+                job = self._q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+
+            if job is None:
+                try:
+                    self._q.task_done()
+                except Exception:
+                    pass
+                break
+
+            try:
+                _process_notification_send_job(job)
+            except Exception:
+                logger.exception("Unhandled exception in async notification worker")
+            finally:
+                try:
+                    self._q.task_done()
+                except Exception:
+                    pass
+
+
+_DISPATCHER: _AsyncNotificationDispatcher | None = None
+_DISPATCHER_LOCK = threading.Lock()
+
+
+def _get_dispatcher() -> _AsyncNotificationDispatcher:
+    global _DISPATCHER
+    with _DISPATCHER_LOCK:
+        if _DISPATCHER is None:
+            _DISPATCHER = _AsyncNotificationDispatcher()
+        return _DISPATCHER
+
+
+def shutdown_notification_dispatcher() -> None:
+    """Shutdown the async notification dispatcher (best-effort)."""
+
+    global _DISPATCHER
+    with _DISPATCHER_LOCK:
+        if _DISPATCHER is not None:
+            try:
+                _DISPATCHER.shutdown()
+            finally:
+                _DISPATCHER = None
+
+
+def wait_for_notification_dispatcher_idle(*, timeout: float = 5.0) -> bool:
+    """Test helper to wait for queued async notification sends to finish."""
+
+    d = _DISPATCHER
+    if d is None:
+        return True
+    return bool(d.wait_for_idle(timeout=float(timeout)))
+
+
+def _process_notification_send_job(job: _NotificationSendJob) -> None:
+    """Execute a single queued send and persist delivery result on the event."""
+
+    SessionMaker = sessionmaker(bind=job.engine, autocommit=False, autoflush=False)
+    db = SessionMaker()
+    try:
+        ev = db.query(NotificationEvent).filter(NotificationEvent.id == int(job.event_id)).first()
+        if not ev:
+            return
+
+        # Resolve service/user at send time (respects disabled/deleted services).
+        svc: UserNotificationService
+        if job.service_id is not None:
+            svc_obj = (
+                db.query(UserNotificationService)
+                .options(joinedload(UserNotificationService.tag))
+                .filter(UserNotificationService.id == int(job.service_id))
+                .first()
+            )
+            if not svc_obj:
+                ev.delivery_status = DELIVERY_SKIPPED
+                ev.delivery_error = "Notification service deleted"
+                _commit_with_retry(db)
+                return
+            if not bool(getattr(svc_obj, "enabled", False)):
+                ev.delivery_status = DELIVERY_SKIPPED
+                ev.delivery_error = "Notification service disabled"
+                _commit_with_retry(db)
+                return
+            svc = svc_obj
+        else:
+            # Legacy channel send.
+            svc = UserNotificationService(
+                user_id=int(job.user_id),
+                service_type=str(job.service_type),
+                name=None,
+                enabled=True,
+                config_json=job.legacy_config_json,
+                tag_id=0,
+            )
+
+        user = db.query(User).filter(User.id == int(job.user_id)).first()
+        if not user:
+            ev.delivery_status = DELIVERY_FAILED
+            ev.delivery_error = "User not found"
+            _commit_with_retry(db)
+            return
+
+        # Mark attempt.
+        now = _now_utc_naive()
+        try:
+            ev.delivery_attempts = int(getattr(ev, "delivery_attempts", 0) or 0) + 1
+        except Exception:
+            ev.delivery_attempts = 1
+        ev.last_attempt_at_utc = now
+        ev.delivery_status = DELIVERY_SENDING
+        ev.delivery_error = None
+        _commit_with_retry(db)
+
+        try:
+            _send_notification_via_service_impl(
+                db,
+                svc=svc,
+                user=user,
+                title=job.title,
+                message_text=job.message_text,
+                message_html=job.message_html,
+                payload=dict(job.payload or {}),
+            )
+        except Exception as e:
+            err = _format_exception(e)
+            logger.exception(
+                "Notification delivery failed (event_id=%s service=%s svc_id=%s user_id=%s task_id=%s): %s",
+                int(job.event_id),
+                str(job.service_type),
+                (int(job.service_id) if job.service_id is not None else None),
+                int(job.user_id),
+                (int(job.task_id) if job.task_id is not None else None),
+                err,
+            )
+            ev.delivery_status = DELIVERY_FAILED
+            ev.delivery_error = err
+            ev.delivered_at_utc = None
+            _commit_with_retry(db)
+            return
+
+        # Success.
+        ev.delivery_status = DELIVERY_SENT
+        ev.delivery_error = None
+        ev.delivered_at_utc = _now_utc_naive()
+        _commit_with_retry(db)
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
 
 
 def notify_task_event(
@@ -732,7 +1281,11 @@ def notify_task_event(
         payload.setdefault("task_internal_url", _task_internal_url(int(task.id)))
 
         for svc in services:
+            st = str(svc.service_type or "").strip().lower()
             svc_key = f"{event_key}:svc{int(svc.id)}" if event_key else None
+
+            initial_status = DELIVERY_SENT if st == CHANNEL_BROWSER else DELIVERY_QUEUED
+            delivered_at = _now_utc_naive() if st == CHANNEL_BROWSER else None
             # Persist event for browser delivery and for dedupe of scheduled events.
             ev = create_notification_event(
                 db,
@@ -744,6 +1297,11 @@ def notify_task_event(
                 event_key=svc_key,
                 service_id=int(svc.id),
                 service_type=str(svc.service_type),
+                delivery_status=initial_status,
+                delivery_error=None,
+                delivery_attempts=0,
+                last_attempt_at_utc=None,
+                delivered_at_utc=delivered_at,
             )
             if ev is None:
                 # deduped
@@ -758,15 +1316,44 @@ def notify_task_event(
                 "tag": (svc.tag.name if getattr(svc, "tag", None) is not None else None),
             }
 
-            _send_notification_via_service(
-                db,
-                svc=svc,
-                user=user,
-                title=title,
-                message_text=msg_text,
-                message_html=msg_html,
-                payload=payload2,
-            )
+            if st != CHANNEL_BROWSER:
+                eng = _session_engine(db)
+                if not eng:
+                    try:
+                        ev.delivery_status = DELIVERY_FAILED
+                        ev.delivery_error = "async_dispatch_no_db_bind"
+                        _commit_with_retry(db)
+                    except Exception:
+                        logger.exception(
+                            "Failed to persist notification dispatch failure (no db bind) (event_id=%s)",
+                            int(ev.id),
+                        )
+                    continue
+                job = _NotificationSendJob(
+                    engine=eng,
+                    event_id=int(ev.id),
+                    user_id=int(user.id),
+                    task_id=int(task.id) if getattr(task, "id", None) is not None else None,
+                    service_id=int(svc.id),
+                    service_type=st,
+                    title=title,
+                    message_text=msg_text,
+                    message_html=msg_html,
+                    payload=payload2,
+                )
+                if not _get_dispatcher().submit(job):
+                    # Queue is full or dispatcher stopped: persist the failure.
+                    try:
+                        ev.delivery_status = DELIVERY_FAILED
+                        ev.delivery_error = "async_dispatch_queue_full"
+                        _commit_with_retry(db)
+                    except Exception:
+                        logger.exception(
+                            "Failed to persist notification dispatch failure (event_id=%s service=%s svc_id=%s)",
+                            int(ev.id),
+                            st,
+                            int(svc.id),
+                        )
         return
 
     # ---- Legacy fallback ---------------------------------------------------------
@@ -791,10 +1378,14 @@ def notify_task_event(
         return
 
     for ch in channels:
+        st = str(ch.channel_type or "").strip().lower()
         # Persist one NotificationEvent per channel so browser delivery can
         # filter on service_type, while also allowing per-channel dedupe for
         # scheduled events (e.g. past_due).
         ch_key = f"{event_key}:ch{str(ch.channel_type)}" if event_key else None
+
+        initial_status = DELIVERY_SENT if st == CHANNEL_BROWSER else DELIVERY_QUEUED
+        delivered_at = _now_utc_naive() if st == CHANNEL_BROWSER else None
         ev = create_notification_event(
             db,
             user_id=int(user.id),
@@ -805,26 +1396,49 @@ def notify_task_event(
             event_key=ch_key,
             service_id=None,
             service_type=str(ch.channel_type),
+            delivery_status=initial_status,
+            delivery_error=None,
+            delivery_attempts=0,
+            last_attempt_at_utc=None,
+            delivered_at_utc=delivered_at,
         )
         if ev is None:
             continue
 
-        # Channel model is legacy 1-per-type; reuse the service sender by
-        # adapting it into a fake service entry.
-        tmp_svc = UserNotificationService(
-            user_id=int(user.id),
-            service_type=str(ch.channel_type),
-            name=None,
-            enabled=bool(ch.enabled),
-            config_json=ch.config_json,
-            tag_id=0,
-        )
-        _send_notification_via_service(
-            db,
-            svc=tmp_svc,
-            user=user,
-            title=title,
-            message_text=msg_text,
-            message_html=msg_html,
-            payload=payload,
-        )
+        if st != CHANNEL_BROWSER:
+            eng = _session_engine(db)
+            if not eng:
+                try:
+                    ev.delivery_status = DELIVERY_FAILED
+                    ev.delivery_error = "async_dispatch_no_db_bind"
+                    _commit_with_retry(db)
+                except Exception:
+                    logger.exception(
+                        "Failed to persist legacy notification dispatch failure (no db bind) (event_id=%s)",
+                        int(ev.id),
+                    )
+                continue
+            job = _NotificationSendJob(
+                engine=eng,
+                event_id=int(ev.id),
+                user_id=int(user.id),
+                task_id=int(task.id) if getattr(task, "id", None) is not None else None,
+                service_id=None,
+                service_type=st,
+                title=title,
+                message_text=msg_text,
+                message_html=msg_html,
+                payload=payload,
+                legacy_config_json=ch.config_json,
+            )
+            if not _get_dispatcher().submit(job):
+                try:
+                    ev.delivery_status = DELIVERY_FAILED
+                    ev.delivery_error = "async_dispatch_queue_full"
+                    _commit_with_retry(db)
+                except Exception:
+                    logger.exception(
+                        "Failed to persist legacy notification dispatch failure (event_id=%s service=%s)",
+                        int(ev.id),
+                        st,
+                    )

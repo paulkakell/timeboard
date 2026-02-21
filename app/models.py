@@ -225,6 +225,21 @@ class NotificationEvent(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Delivery metadata (best-effort). Populated for non-browser services when
+    # sends are performed asynchronously.
+    #
+    # delivery_status values are small strings like:
+    #   - queued
+    #   - sending
+    #   - sent
+    #   - failed
+    #   - skipped
+    delivery_status: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivery_attempts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_attempt_at_utc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    delivered_at_utc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 

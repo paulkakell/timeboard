@@ -23,7 +23,8 @@
             {{ svc.service_type|upper }}{% if svc.name %} — {{ svc.name }}{% endif %}
           </h2>
           <div class="text-muted small">
-            Tag: <code>{{ svc.tag.name }}</code>
+            Tag: <code class="copy-to-clipboard" data-copy-text="{{ svc.tag.name }}" data-copy-feedback="copy-feedback-{{ svc.id }}" tabindex="0" role="button" aria-label="Copy tag to clipboard" title="Click to copy">{{ svc.tag.name }}</code>
+            <span id="copy-feedback-{{ svc.id }}" class="ms-2 text-success" style="display:none;">Copied</span>
           </div>
         </div>
         <form method="post" action="/profile/notifications" onsubmit="return confirm('Delete this notification service? This will also delete its generated tag and remove it from tasks.');">
@@ -60,7 +61,7 @@
           <div class="mb-2">
             <label class="form-label">To address (optional)</label>
             <input class="form-control" name="email_to_address" value="{{ svc.cfg.get('to_address','') }}" placeholder="Leave blank to use your account email ({{ current_user.email or 'not set' }})">
-            <div class="form-text">Requires admin SMTP configuration.</div>
+            <div class="form-text">Requires admin email configuration (SMTP or SendGrid).</div>
           </div>
 
         {% elif svc.service_type == 'gotify' %}
@@ -165,6 +166,7 @@
         <option value="wns">Windows Push (WNS)</option>
         <option value="gotify">Gotify</option>
         <option value="ntfy">ntfy</option>
+        <option value="discord">Discord</option>
         <option value="webhook">Generic webhook</option>
         <option value="generic_api">Generic API</option>
       </select>
@@ -216,6 +218,13 @@
     <input class="form-control" type="password" name="ntfy_token">
     <label class="form-label mt-2">Priority (optional)</label>
     <input class="form-control" name="ntfy_priority">
+  </div>
+
+  <div class="card card-body mb-3">
+    <h3 class="h6">Discord</h3>
+    <label class="form-label">Webhook URL</label>
+    <input class="form-control" type="password" name="discord_webhook_url" placeholder="https://discord.com/api/webhooks/...">
+    <div class="form-text">Discord webhooks support Markdown in the message content.</div>
   </div>
 
   <div class="card card-body mb-3">

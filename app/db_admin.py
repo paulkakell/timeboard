@@ -12,6 +12,7 @@ from .crud import normalize_email
 from .models import (
     AppMeta,
     NotificationEvent,
+    PasswordResetToken,
     RecurrenceType,
     Tag,
     Task,
@@ -301,6 +302,82 @@ def backup_database_json(
     """Create a JSON backup of the current database."""
     data = export_db_json(db)
     return write_backup_json(data, prefix=prefix, backups_dir=backups_dir)
+
+
+def purge_all_data(
+    db: Session,
+    *,
+    preserve_users: bool = True,
+    preserve_user_ids: set[int] | None = None,
+    preserve_app_meta: bool = True,
+) -> dict[str, int]:
+    """Permanently delete all operational data from the database.
+
+    This is intended for "reset" workflows (ex: removing seeded demo data).
+
+    By default this preserves:
+      - User accounts
+      - AppMeta (DB-backed settings)
+
+    Returns per-table deletion counts.
+    """
+
+    preserve_ids = {int(x) for x in (preserve_user_ids or set())}
+
+    counts: dict[str, int] = {}
+
+    try:
+        # Notifications + auth tokens
+        counts["notification_events"] = int(
+            db.query(NotificationEvent).delete(synchronize_session=False) or 0
+        )
+        counts["password_reset_tokens"] = int(
+            db.query(PasswordResetToken).delete(synchronize_session=False) or 0
+        )
+
+        # Notification config tables
+        counts["user_notification_channels"] = int(
+            db.query(UserNotificationChannel).delete(synchronize_session=False) or 0
+        )
+        counts["user_notification_tags"] = int(
+            db.query(UserNotificationTag).delete(synchronize_session=False) or 0
+        )
+        counts["user_notification_services"] = int(
+            db.query(UserNotificationService).delete(synchronize_session=False) or 0
+        )
+
+        # Core task data
+        counts["tasks"] = int(db.query(Task).delete(synchronize_session=False) or 0)
+        # Association table is usually cleared via FK cascades, but delete
+        # explicitly for safety (and to avoid leaving orphan rows if FK
+        # enforcement is disabled).
+        try:
+            db.execute(text("DELETE FROM task_tags"))
+        except Exception:
+            pass
+        counts["tags"] = int(db.query(Tag).delete(synchronize_session=False) or 0)
+
+        # Optionally remove users (preserving requested IDs).
+        if not preserve_users:
+            q = db.query(User)
+            if preserve_ids:
+                q = q.filter(~User.id.in_(sorted(preserve_ids)))
+            counts["users"] = int(q.delete(synchronize_session=False) or 0)
+        else:
+            counts["users"] = 0
+
+        # Optionally remove app_meta.
+        if not preserve_app_meta:
+            counts["app_meta"] = int(db.query(AppMeta).delete(synchronize_session=False) or 0)
+        else:
+            counts["app_meta"] = 0
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return counts
 
 
 def _get_meta_value(db: Session, key: str) -> str | None:

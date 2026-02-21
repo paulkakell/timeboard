@@ -13,33 +13,61 @@
   <div class="card card-body">
     <div class="form-check form-switch mb-3">
       <input class="form-check-input" type="checkbox" name="enabled" id="enabled" {% if email_cfg.enabled %}checked{% endif %}>
-      <label class="form-check-label" for="enabled">Enable SMTP email</label>
+      <label class="form-check-label" for="enabled">Enable email</label>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Provider</label>
+      <select class="form-select" name="provider">
+        <option value="smtp" {% if email_cfg.provider == 'smtp' %}selected{% endif %}>SMTP</option>
+        <option value="sendgrid" {% if email_cfg.provider == 'sendgrid' %}selected{% endif %}>SendGrid API</option>
+      </select>
+      <div class="form-text">
+        SMTP uses the configured host/port credentials. SendGrid uses an API key and does not require an SMTP server.
+      </div>
     </div>
 
     <div class="row">
-      <div class="col-md-6 mb-2">
-        <label class="form-label">SMTP host</label>
-        <input class="form-control" name="smtp_host" value="{{ email_cfg.smtp_host }}">
-      </div>
-      <div class="col-md-3 mb-2">
-        <label class="form-label">SMTP port</label>
-        <input class="form-control" type="number" name="smtp_port" value="{{ email_cfg.smtp_port }}">
-      </div>
-      <div class="col-md-3 mb-2">
-        <div class="form-check form-switch mt-4">
-          <input class="form-check-input" type="checkbox" name="use_tls" id="use_tls" {% if email_cfg.use_tls %}checked{% endif %}>
-          <label class="form-check-label" for="use_tls">Use STARTTLS</label>
+      <div class="col-md-12 mb-2">
+        <label class="form-label">SendGrid API key (provider: SendGrid)</label>
+        <input class="form-control" type="password" name="sendgrid_api_key" value="" placeholder="Leave blank to keep existing">
+        <div class="form-text">Leave blank to keep existing. Check below to clear.</div>
+        <div class="form-check mt-1">
+          <input class="form-check-input" type="checkbox" name="clear_sendgrid_api_key" id="clear_sendgrid_api_key">
+          <label class="form-check-label" for="clear_sendgrid_api_key">Clear stored SendGrid API key</label>
         </div>
       </div>
     </div>
 
     <div class="row">
       <div class="col-md-6 mb-2">
-        <label class="form-label">SMTP username</label>
+        <label class="form-label">SMTP host (provider: SMTP)</label>
+        <input class="form-control" name="smtp_host" value="{{ email_cfg.smtp_host }}">
+        <div class="form-text">
+          If Timeboard is running in Docker, <code>localhost</code> refers to the container. Use a reachable hostname/IP
+          (for example: the SMTP container service name on the same docker-compose network, or <code>host.docker.internal</code>
+          when the SMTP server runs on the Docker host).
+        </div>
+      </div>
+      <div class="col-md-3 mb-2">
+        <label class="form-label">SMTP port (provider: SMTP)</label>
+        <input class="form-control" type="number" name="smtp_port" value="{{ email_cfg.smtp_port }}">
+      </div>
+      <div class="col-md-3 mb-2">
+        <div class="form-check form-switch mt-4">
+          <input class="form-check-input" type="checkbox" name="use_tls" id="use_tls" {% if email_cfg.use_tls %}checked{% endif %}>
+          <label class="form-check-label" for="use_tls">Use STARTTLS (provider: SMTP)</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-6 mb-2">
+        <label class="form-label">SMTP username (provider: SMTP)</label>
         <input class="form-control" name="smtp_username" value="{{ email_cfg.smtp_username }}">
       </div>
       <div class="col-md-6 mb-2">
-        <label class="form-label">SMTP password</label>
+        <label class="form-label">SMTP password (provider: SMTP)</label>
         <input class="form-control" type="password" name="smtp_password" value="" placeholder="Leave blank to keep existing">
         <div class="form-text">Leave blank to keep existing. Check below to clear.</div>
         <div class="form-check mt-1">
@@ -52,6 +80,7 @@
     <div class="mb-2">
       <label class="form-label">From address</label>
       <input class="form-control" name="smtp_from" value="{{ email_cfg.smtp_from }}" placeholder="no-reply@example.com">
+      <div class="form-text">Used for both SMTP and SendGrid. For SendGrid, the sender may need to be verified in your SendGrid account.</div>
     </div>
 
     <div class="row">

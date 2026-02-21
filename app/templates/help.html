@@ -34,6 +34,10 @@
   Each notification service entry creates a unique tag. If a task includes that tag, notifications are sent to that service whenever the task changes.
 </p>
 
+<p class="text-muted">
+  Non-browser notifications (email/webhooks/etc.) are dispatched asynchronously. If a send fails, the delivery status and an error summary are recorded on the notification event log (and in the application logs).
+</p>
+
 <h3>What triggers notifications</h3>
 <ul>
   <li><strong>created</strong>: a new task is created</li>
@@ -46,7 +50,7 @@
 <h3>Notification routing (service tags)</h3>
 <ol>
   <li>Create one or more notification services in your profile.</li>
-  <li>Copy the generated <code>notify:…</code> tag for that service.</li>
+  <li>Copy the generated <code>notify:…</code> tag for that service (tip: click the tag in the Notifications page to copy).</li>
   <li>Add that tag to any task you want routed to that service.</li>
   <li>If a task has multiple service tags, it will send to multiple services.</li>
 </ol>
@@ -68,10 +72,11 @@
 
 <ul>
   <li><strong>Browser</strong>: delivered to the currently-open browser via an SSE stream. Requires browser permission.</li>
-  <li><strong>Email</strong>: sends an email per notification. Requires admin SMTP configuration.</li>
+  <li><strong>Email</strong>: sends an email per notification. Requires admin email configuration (SMTP or SendGrid).</li>
   <li><strong>Windows Push Notifications (WNS)</strong>: requires admin WNS credentials and a per-device channel URI in your service entry.</li>
   <li><strong>Gotify</strong>: posts to a Gotify server using an application token.</li>
   <li><strong>ntfy</strong>: posts to an ntfy topic (supports optional token and click-through link).</li>
+  <li><strong>Discord</strong>: posts to a Discord channel via webhook (uses an embed so the task name is clickable when an absolute URL is available).</li>
   <li><strong>Generic webhook</strong>: POSTs a JSON payload to a URL; optional secret is sent as <code>X-Timeboard-Secret</code>.</li>
   <li><strong>Generic API</strong>: calls a configurable URL/method with optional headers/token and a JSON body (for POST/PUT/PATCH).</li>
 </ul>
@@ -132,10 +137,15 @@
 
 <h2>Admin settings</h2>
 
-<h3>Email (SMTP)</h3>
+<h3>Email</h3>
 <p>
-  SMTP settings are configured in <a href="/admin/email">Admin → Email</a> and stored in the database.
+  Email settings are configured in <a href="/admin/email">Admin → Email</a> and stored in the database.
   The sample <code>settings.yml</code> can be used once to seed initial values, but runtime configuration is managed in the admin UI (or via the admin API).
+</p>
+<p>
+  SMTP Docker note: if Timeboard is running in a container, <code>localhost</code>/<code>127.0.0.1</code> refers to the container itself.
+  Use a hostname/IP that is reachable from inside the container (for example: an SMTP container service name on the same docker-compose network,
+  or <code>host.docker.internal</code> when using Docker Desktop).
 </p>
 
 <h3>Push notifications (WNS)</h3>
@@ -208,8 +218,8 @@
 
 <h4>/api/admin</h4>
 <ul>
-  <li><code>GET /api/admin/email</code> — get SMTP/email settings (admin).</li>
-  <li><code>PUT /api/admin/email</code> — update SMTP/email settings (admin).</li>
+  <li><code>GET /api/admin/email</code> — get email settings (admin).</li>
+  <li><code>PUT /api/admin/email</code> — update email settings (admin).</li>
   <li><code>GET /api/admin/logging</code> — get logging settings (admin).</li>
   <li><code>PUT /api/admin/logging</code> — update logging settings (admin).</li>
   <li><code>GET /api/admin/wns</code> — get WNS settings (admin).</li>
@@ -272,18 +282,30 @@
 <h3>Admin API examples</h3>
 <p class="text-muted">Admin endpoints require an admin user.</p>
 
-<p>Update SMTP settings:</p>
+<p>Update email settings (SMTP):</p>
 <pre><code>curl -X PUT http://localhost:8000/api/admin/email \
   -H "Authorization: Bearer &lt;ADMIN_TOKEN&gt;" \
   -H "Content-Type: application/json" \
   -d '{
     "enabled": true,
+    "provider": "smtp",
     "smtp_host": "smtp.example.com",
     "smtp_port": 587,
     "smtp_username": "user@example.com",
     "smtp_password": "YOUR_PASSWORD",
     "smtp_from": "Timeboard &lt;timeboard@example.com&gt;",
     "use_tls": true
+  }'</code></pre>
+
+<p>Update email settings (SendGrid):</p>
+<pre><code>curl -X PUT http://localhost:8000/api/admin/email \
+  -H "Authorization: Bearer &lt;ADMIN_TOKEN&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "provider": "sendgrid",
+    "sendgrid_api_key": "YOUR_SENDGRID_API_KEY",
+    "smtp_from": "Timeboard &lt;timeboard@example.com&gt;"
   }'</code></pre>
 
 <p>List log files:</p>
