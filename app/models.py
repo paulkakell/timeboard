@@ -64,6 +64,10 @@ class User(Base):
     theme: Mapped[str] = mapped_column(String(16), default=Theme.system.value, nullable=False)
     purge_days: Mapped[int] = mapped_column(Integer, default=15, nullable=False)
 
+    # UI preferences persisted per-user (JSON string).
+    # Kept nullable and schema-upgradable via lightweight migrations.
+    ui_prefs_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False

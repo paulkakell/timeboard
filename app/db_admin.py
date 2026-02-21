@@ -143,6 +143,7 @@ def export_db_json(db: Session) -> Dict[str, Any]:
                 "is_admin": bool(u.is_admin),
                 "theme": u.theme,
                 "purge_days": int(u.purge_days),
+                "ui_prefs_json": u.ui_prefs_json,
                 "created_at": _dt(u.created_at),
                 "updated_at": _dt(u.updated_at),
             }
@@ -621,6 +622,11 @@ def validate_import_payload(payload: Any) -> Tuple[List[str], List[str]]:
             except Exception:
                 errors.append(f"{ctx}: '{dt_field}' is not a valid ISO8601 datetime")
 
+        # Optional UI prefs (stringified JSON). Kept best-effort for forwards compatibility.
+        ui_prefs = u.get("ui_prefs_json")
+        if ui_prefs is not None and not isinstance(ui_prefs, str):
+            warnings.append(f"{ctx}: ui_prefs_json should be a string; ignoring")
+
     if admin_count == 0:
         warnings.append("No admin users found in import; an admin account will be auto-created on the next login attempt")
 
@@ -828,6 +834,7 @@ def import_db_json(db: Session, payload: Dict[str, Any], *, replace: bool = True
                     is_admin=is_admin,
                     theme=theme,
                     purge_days=int(u.get("purge_days") or 15),
+                    ui_prefs_json=(str(u.get("ui_prefs_json")) if u.get("ui_prefs_json") is not None else None),
                     created_at=created_at,
                     updated_at=updated_at,
                 )

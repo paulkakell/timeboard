@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import secrets
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote, urlparse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -90,6 +91,8 @@ from ..utils.humanize import humanize_timedelta, time_left_class, seconds_to_dur
 from ..utils.time_utils import iso_for_datetime_local_input, now_utc, to_local
 from ..version import APP_VERSION
 
+from markupsafe import Markup, escape
+
 
 router = APIRouter(include_in_schema=False)
 
@@ -98,6 +101,70 @@ templates_dir = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(templates_dir))
 # Jinja filters
 templates.env.filters["dt_local"] = lambda dt: to_local(dt).strftime("%Y-%m-%d %H:%M") if dt else ""
+
+
+_URL_RE = re.compile(r"((?:https?://|www\.)[^\s<]+)", re.IGNORECASE)
+_TRAILING_PUNCT = ".,;:!?)]}"
+
+
+def linkify_urls(text: str | None) -> Markup:
+    """Convert plain-text URLs into clickable links.
+
+    This is intentionally conservative:
+    - Only http(s):// and www.* URLs are linkified.
+    - All non-URL text is HTML-escaped.
+    - Links open in a new tab with noopener/noreferrer.
+    """
+
+    if not text:
+        return Markup("")
+
+    s = str(text)
+    parts: list[str] = []
+    last = 0
+
+    for m in _URL_RE.finditer(s):
+        start, end = m.span(1)
+        raw_url = m.group(1)
+
+        # Prefix text (escaped)
+        if start > last:
+            parts.append(str(escape(s[last:start])))
+
+        # Strip common trailing punctuation from the URL match.
+        url = raw_url
+        trailing = ""
+        while url and url[-1] in _TRAILING_PUNCT:
+            trailing = url[-1] + trailing
+            url = url[:-1]
+
+        href = url
+        if href.lower().startswith("www."):
+            href = "https://" + href
+
+        # Only allow http(s) schemes.
+        if href.lower().startswith("http://") or href.lower().startswith("https://"):
+            href_esc = str(escape(href))
+            text_esc = str(escape(url))
+            parts.append(
+                f'<a href="{href_esc}" target="_blank" rel="noopener noreferrer">{text_esc}</a>'
+            )
+        else:
+            parts.append(str(escape(raw_url)))
+
+        if trailing:
+            parts.append(str(escape(trailing)))
+
+        last = end
+
+    if last < len(s):
+        parts.append(str(escape(s[last:])))
+
+    # Output is built only from markupsafe.escape()-escaped fragments.
+    return Markup("".join(parts))  # nosec B704
+
+
+templates.env.filters["linkify"] = linkify_urls
 
 # Global template vars
 templates.env.globals["app_version"] = APP_VERSION
@@ -119,6 +186,94 @@ logger = logging.getLogger("timeboard.ui")
 
 # Session key for remembering dashboard filter state.
 DASHBOARD_FILTERS_SESSION_KEY = "dashboard_filters"
+
+
+# ---- Per-user UI preferences (DB persisted) ----
+
+DEFAULT_CALENDAR_FILTERS: dict[str, bool] = {
+    "tl-past": True,
+    "tl-0-8": True,
+    "tl-8-24": True,
+    "tl-24p": True,
+    "completed": False,
+    "deleted": False,
+}
+
+ALLOWED_CALENDAR_VIEWS = {"dayGridMonth", "timeGridWeek", "timeGridDay", "multiMonthYear"}
+DEFAULT_CALENDAR_VIEW = "dayGridMonth"
+
+
+def _parse_ui_prefs_json(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        obj = json.loads(raw)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _calendar_prefs_for_user(user: User) -> dict[str, Any]:
+    """Return merged calendar prefs for a user (with defaults)."""
+
+    ui = _parse_ui_prefs_json(getattr(user, "ui_prefs_json", None))
+    cal = ui.get("calendar") if isinstance(ui.get("calendar"), dict) else {}
+    stored_filters = cal.get("filters") if isinstance(cal.get("filters"), dict) else {}
+
+    filters: dict[str, bool] = dict(DEFAULT_CALENDAR_FILTERS)
+    for k, v in stored_filters.items():
+        if k in filters and isinstance(v, bool):
+            filters[k] = v
+
+    view = cal.get("view") if isinstance(cal.get("view"), str) else DEFAULT_CALENDAR_VIEW
+    if view not in ALLOWED_CALENDAR_VIEWS:
+        view = DEFAULT_CALENDAR_VIEW
+
+    return {"filters": filters, "view": view}
+
+
+def _save_calendar_prefs_for_user(db: Session, *, user: User, prefs: dict[str, Any]) -> None:
+    """Persist calendar prefs into users.ui_prefs_json (best-effort)."""
+
+    existing = _parse_ui_prefs_json(getattr(user, "ui_prefs_json", None))
+    cal_existing = existing.get("calendar") if isinstance(existing.get("calendar"), dict) else {}
+
+    # Filters (merge defaults + stored + optional incoming partial update)
+    stored_filters = cal_existing.get("filters") if isinstance(cal_existing.get("filters"), dict) else {}
+    new_filters: dict[str, bool] = dict(DEFAULT_CALENDAR_FILTERS)
+    for k, v in stored_filters.items():
+        if k in new_filters and isinstance(v, bool):
+            new_filters[k] = v
+
+    incoming_filters = prefs.get("filters") if isinstance(prefs.get("filters"), dict) else None
+    if isinstance(incoming_filters, dict):
+        for k, v in incoming_filters.items():
+            if k in new_filters and isinstance(v, bool):
+                new_filters[k] = v
+
+    # View (optional)
+    view = cal_existing.get("view") if isinstance(cal_existing.get("view"), str) else DEFAULT_CALENDAR_VIEW
+    incoming_view = prefs.get("view")
+    if isinstance(incoming_view, str) and incoming_view in ALLOWED_CALENDAR_VIEWS:
+        view = incoming_view
+    if view not in ALLOWED_CALENDAR_VIEWS:
+        view = DEFAULT_CALENDAR_VIEW
+
+    existing["calendar"] = {
+        **({} if not isinstance(cal_existing, dict) else cal_existing),
+        "filters": new_filters,
+        "view": view,
+    }
+
+    try:
+        user.ui_prefs_json = json.dumps(existing, separators=(",", ":"))
+    except Exception:
+        # If serialization fails, don't break the UI.
+        return
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
 
 
 def _merge_stateful_dashboard_filters(
@@ -243,6 +398,31 @@ def _get_current_user(request: Request, db: Session) -> Optional[User]:
 
 def _redirect(url: str) -> RedirectResponse:
     return RedirectResponse(url=url, status_code=303)
+
+
+def _safe_next_url(next_url: str | None, *, default: str) -> str:
+    """Prevent open-redirects by allowing only local, absolute-path URLs."""
+    if not next_url:
+        return default
+    try:
+        s = str(next_url).strip()
+        if not s:
+            return default
+        # Only allow absolute-path relative URLs.
+        if not s.startswith("/"):
+            return default
+        # Disallow scheme-relative URLs.
+        if s.startswith("//"):
+            return default
+        # Avoid backslash tricks.
+        if "\\" in s:
+            return default
+        parsed = urlparse(s)
+        if parsed.scheme or parsed.netloc:
+            return default
+        return s
+    except Exception:
+        return default
 
 
 def _parse_tags_csv(text: str) -> list[str]:
@@ -794,6 +974,11 @@ def dashboard(
     prev_url = _make_url(pnum - 1) if pnum > 1 else None
     next_url = _make_url(pnum + 1) if pnum < total_pages else None
 
+    # Used by dashboard action forms/links so completing/updating/deleting a task
+    # can return to the current page instead of resetting to page 1.
+    return_to = _make_url(pnum)
+    return_to_q = quote(return_to, safe="")
+
     return templates.TemplateResponse(
         template_name,
         _template_context(
@@ -817,6 +1002,8 @@ def dashboard(
             page_links=page_links,
             prev_url=prev_url,
             next_url=next_url,
+            return_to=return_to,
+            return_to_q=return_to_q,
         ),
     )
 
@@ -826,6 +1013,8 @@ def calendar_view(request: Request, db: Session = Depends(get_db)):
     user = _get_current_user(request, db)
     if not user:
         return _redirect("/login")
+
+    cal_prefs = _calendar_prefs_for_user(user)
 
     # Calendar always shows tasks for the currently-logged-in user.
     effective_user_id = int(user.id) if user.is_admin else None
@@ -856,10 +1045,22 @@ def calendar_view(request: Request, db: Session = Depends(get_db)):
         # - Completed/Deleted: fixed colors.
         if t.status == TaskStatus.completed:
             colors = {"bg": "#6c757d", "text": "#ffffff"}
+            cat_key = "completed"
         elif t.status == TaskStatus.deleted:
             colors = {"bg": "#343a40", "text": "#ffffff"}
+            cat_key = "deleted"
         else:
             colors = color_map.get(cls, {"bg": "#0d6efd", "text": "#ffffff"})
+            cat_key = cls
+
+        # Pre-apply user filters to avoid initial render flicker.
+        display = "auto"
+        try:
+            f = cal_prefs.get("filters") if isinstance(cal_prefs, dict) else {}
+            if isinstance(f, dict) and cat_key in f and f.get(cat_key) is False:
+                display = "none"
+        except Exception:
+            display = "auto"
 
         start_local = to_local(t.due_date_utc)
         end_local = start_local + timedelta(minutes=30)
@@ -870,7 +1071,8 @@ def calendar_view(request: Request, db: Session = Depends(get_db)):
                 "title": t.name,
                 "start": start_local.isoformat(),
                 "end": end_local.isoformat(),
-                "url": f"/tasks/{int(t.id)}/edit",
+                "url": f"/tasks/{int(t.id)}/edit?next=/calendar",
+                "display": display,
                 "backgroundColor": colors["bg"],
                 "borderColor": colors["bg"],
                 "textColor": colors["text"],
@@ -886,6 +1088,7 @@ def calendar_view(request: Request, db: Session = Depends(get_db)):
 
     # Safer embedding into <script> blocks.
     events_json = json.dumps(events).replace("</", "<\\/")
+    prefs_json = json.dumps(cal_prefs).replace("</", "<\\/")
 
     return templates.TemplateResponse(
         "calendar.html",
@@ -894,9 +1097,36 @@ def calendar_view(request: Request, db: Session = Depends(get_db)):
             user,
             db=db,
             events_json=events_json,
+            prefs_json=prefs_json,
             app_timezone=settings.app.timezone,
         ),
     )
+
+
+@router.post("/ui/prefs/calendar", response_class=JSONResponse)
+async def ui_prefs_calendar(request: Request, db: Session = Depends(get_db)):
+    """Persist calendar UI state (filters + selected view) per-user."""
+
+    user = _get_current_user(request, db)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    if not isinstance(payload, dict):
+        payload = {}
+
+    # Best-effort validation is handled in _save_calendar_prefs_for_user.
+    try:
+        _save_calendar_prefs_for_user(db, user=user, prefs=payload)
+    except Exception:
+        logger.exception("Failed to save calendar prefs")
+        return JSONResponse({"error": "failed"}, status_code=500)
+
+    return {"status": "ok"}
 
 
 @router.get("/archived", response_class=HTMLResponse)
@@ -966,7 +1196,7 @@ def archived(
 
 
 @router.get("/tasks/new", response_class=HTMLResponse)
-def task_new_get(request: Request, db: Session = Depends(get_db)):
+def task_new_get(request: Request, next: str | None = None, db: Session = Depends(get_db)):
     user = _get_current_user(request, db)
     if not user:
         return _redirect("/login")
@@ -980,6 +1210,7 @@ def task_new_get(request: Request, db: Session = Depends(get_db)):
             db=db,
             mode="new",
             error=None,
+            next_url=_safe_next_url(next, default="/dashboard"),
             **ctx,
         ),
     )
@@ -997,6 +1228,7 @@ def task_new_post(
     recurrence_interval: str = Form(""),
     recurrence_times: str = Form(""),
     tags: str = Form(""),
+    next: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = _get_current_user(request, db)
@@ -1030,6 +1262,7 @@ def task_new_post(
                     db=db,
                     mode="new",
                     error="Invalid due date format",
+                    next_url=_safe_next_url(next, default="/dashboard"),
                     **ctx,
                 ),
                 status_code=400,
@@ -1070,16 +1303,17 @@ def task_new_post(
                 db=db,
                 mode="new",
                 error=str(e),
+                next_url=_safe_next_url(next, default="/dashboard"),
                 **ctx,
             ),
             status_code=400,
         )
 
-    return _redirect("/dashboard")
+    return _redirect(_safe_next_url(next, default="/dashboard"))
 
 
 @router.get("/tasks/{task_id}/edit", response_class=HTMLResponse)
-def task_edit_get(request: Request, task_id: int, db: Session = Depends(get_db)):
+def task_edit_get(request: Request, task_id: int, next: str | None = None, db: Session = Depends(get_db)):
     user = _get_current_user(request, db)
     if not user:
         return _redirect("/login")
@@ -1099,6 +1333,7 @@ def task_edit_get(request: Request, task_id: int, db: Session = Depends(get_db))
             db=db,
             mode="edit",
             error=None,
+            next_url=_safe_next_url(next, default="/dashboard"),
             **ctx,
         ),
     )
@@ -1117,6 +1352,7 @@ def task_edit_post(
     recurrence_interval: str = Form(""),
     recurrence_times: str = Form(""),
     tags: str = Form(""),
+    next: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = _get_current_user(request, db)
@@ -1152,6 +1388,7 @@ def task_edit_post(
                     db=db,
                     mode="edit",
                     error="Invalid due date format",
+                    next_url=_safe_next_url(next, default="/dashboard"),
                     **ctx,
                 ),
                 status_code=400,
@@ -1193,16 +1430,17 @@ def task_edit_post(
                 db=db,
                 mode="edit",
                 error=str(e),
+                next_url=_safe_next_url(next, default="/dashboard"),
                 **ctx,
             ),
             status_code=400,
         )
 
-    return _redirect("/dashboard")
+    return _redirect(_safe_next_url(next, default="/dashboard"))
 
 
 @router.post("/tasks/{task_id}/complete")
-def task_complete(request: Request, task_id: int, db: Session = Depends(get_db)):
+def task_complete(request: Request, task_id: int, next: str = Form(""), db: Session = Depends(get_db)):
     user = _get_current_user(request, db)
     if not user:
         return _redirect("/login")
@@ -1217,11 +1455,11 @@ def task_complete(request: Request, task_id: int, db: Session = Depends(get_db))
     except Exception:
         logger.exception("Failed to complete task %s", task_id)
 
-    return _redirect("/dashboard")
+    return _redirect(_safe_next_url(next, default="/dashboard"))
 
 
 @router.post("/tasks/{task_id}/delete")
-def task_delete(request: Request, task_id: int, db: Session = Depends(get_db)):
+def task_delete(request: Request, task_id: int, next: str = Form(""), db: Session = Depends(get_db)):
     user = _get_current_user(request, db)
     if not user:
         return _redirect("/login")
@@ -1236,7 +1474,7 @@ def task_delete(request: Request, task_id: int, db: Session = Depends(get_db)):
     except Exception:
         logger.exception("Failed to delete task %s", task_id)
 
-    return _redirect("/dashboard")
+    return _redirect(_safe_next_url(next, default="/dashboard"))
 
 
 @router.post("/tasks/{task_id}/restore")

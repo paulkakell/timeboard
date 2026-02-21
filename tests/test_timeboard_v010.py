@@ -203,6 +203,9 @@ def test_db_export_import_roundtrip(settings_tmp, tmp_path):
     db = make_session(engine)
     try:
         u1 = create_user(db, username="u6", password="password123", email="u6@example.com")
+        u1.ui_prefs_json = '{"calendar":{"filters":{"completed":false},"view":"dayGridMonth"}}'
+        db.add(u1)
+        db.commit()
         create_task(db, owner=u1, name="T1", task_type="Type", due_date=None, tags=["tag1", "tag2"])
         create_task(db, owner=u1, name="T2", task_type="Type", due_date=None, tags=["tag2"])
 
@@ -221,6 +224,9 @@ def test_db_export_import_roundtrip(settings_tmp, tmp_path):
         import_db_json(db2, exported, replace=True)
 
         assert db2.query(User).count() == 1
+        u = db2.query(User).first()
+        assert u is not None
+        assert u.ui_prefs_json == '{"calendar":{"filters":{"completed":false},"view":"dayGridMonth"}}'
         assert db2.execute(text("SELECT COUNT(*) FROM tasks")).scalar_one() == 2
         assert db2.execute(text("SELECT COUNT(*) FROM tags")).scalar_one() == 2
         assert db2.execute(text("SELECT COUNT(*) FROM task_tags")).scalar_one() >= 3
@@ -259,6 +265,7 @@ def test_migration_from_unversioned_db_adds_email_and_meta(settings_tmp, tmp_pat
     with engine.begin() as conn:
         cols = [r[1] for r in conn.execute(text("PRAGMA table_info(users)"))]
         assert "email" in cols
+        assert "ui_prefs_json" in cols
 
     # Validate db_version is stored.
     db = make_session(engine)
