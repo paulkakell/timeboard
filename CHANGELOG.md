@@ -1,6 +1,29 @@
 # Changelog
 
 
+## 00.08.00
+
+- Additive: Calendar view now includes checkbox filters for the color-coded time-left buckets and for Completed/Deleted tasks.
+  - Completed and Deleted are hidden by default.
+  - Calendar filter + view selection (Month/Week/Day/Year) are persisted per-user.
+- Additive: Dashboard now auto-linkifies URLs found in task descriptions.
+- Fix: Dashboard pagination is now preserved when completing, deleting, or updating tasks (no longer resets to page 1).
+
+Compatibility: Backward compatible (DB migration is additive: new nullable `users.ui_prefs_json`).
+
+Refs: Issue N/A, Commit N/A
+
+
+## 00.07.01
+
+- Fix: Clarify the login-page password reset link text (now labeled "Reset password").
+- Fix/Docs: Document the supported admin password recovery command (`python -m app.cli reset-admin`) for deployments without email reset.
+
+Compatibility: Backward compatible.
+
+Refs: Issue N/A, Commit N/A
+
+
 ## 00.07.00
 
 - Additive: First-run installs now seed a small set of demo tasks/tags for the initial admin account (only when the SQLite DB file did not exist before startup).

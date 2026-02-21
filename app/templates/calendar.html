@@ -19,19 +19,50 @@
 <h1 class="h4 mb-3">Calendar</h1>
 
 <div class="mb-3 small">
-  <div class="d-flex flex-wrap gap-3">
-    <div><span class="tb-legend-swatch" style="background:#ff0000"></span><span>Past due</span></div>
-    <div><span class="tb-legend-swatch" style="background:#ffa500"></span><span>Due in 0–8h</span></div>
-    <div><span class="tb-legend-swatch" style="background:#ffff00"></span><span>Due in 8–24h</span></div>
-    <div><span class="tb-legend-swatch" style="background:#00ff00"></span><span>Due in &gt;24h</span></div>
-    <div><span class="tb-legend-swatch" style="background:#6c757d"></span><span>Completed</span></div>
-    <div><span class="tb-legend-swatch" style="background:#343a40"></span><span>Deleted</span></div>
+  <div class="d-flex flex-wrap gap-3 align-items-center">
+    <div class="form-check form-check-inline m-0">
+      <input class="form-check-input tb-cal-filter" type="checkbox" id="tb-cal-tl-past" data-filter="tl-past" checked>
+      <label class="form-check-label" for="tb-cal-tl-past">
+        <span class="tb-legend-swatch" style="background:#ff0000"></span>Past due
+      </label>
+    </div>
+    <div class="form-check form-check-inline m-0">
+      <input class="form-check-input tb-cal-filter" type="checkbox" id="tb-cal-tl-0-8" data-filter="tl-0-8" checked>
+      <label class="form-check-label" for="tb-cal-tl-0-8">
+        <span class="tb-legend-swatch" style="background:#ffa500"></span>Due in 0–8h
+      </label>
+    </div>
+    <div class="form-check form-check-inline m-0">
+      <input class="form-check-input tb-cal-filter" type="checkbox" id="tb-cal-tl-8-24" data-filter="tl-8-24" checked>
+      <label class="form-check-label" for="tb-cal-tl-8-24">
+        <span class="tb-legend-swatch" style="background:#ffff00"></span>Due in 8–24h
+      </label>
+    </div>
+    <div class="form-check form-check-inline m-0">
+      <input class="form-check-input tb-cal-filter" type="checkbox" id="tb-cal-tl-24p" data-filter="tl-24p" checked>
+      <label class="form-check-label" for="tb-cal-tl-24p">
+        <span class="tb-legend-swatch" style="background:#00ff00"></span>Due in &gt;24h
+      </label>
+    </div>
+    <div class="form-check form-check-inline m-0">
+      <input class="form-check-input tb-cal-filter" type="checkbox" id="tb-cal-completed" data-filter="completed">
+      <label class="form-check-label" for="tb-cal-completed">
+        <span class="tb-legend-swatch" style="background:#6c757d"></span>Completed
+      </label>
+    </div>
+    <div class="form-check form-check-inline m-0">
+      <input class="form-check-input tb-cal-filter" type="checkbox" id="tb-cal-deleted" data-filter="deleted">
+      <label class="form-check-label" for="tb-cal-deleted">
+        <span class="tb-legend-swatch" style="background:#343a40"></span>Deleted
+      </label>
+    </div>
   </div>
 </div>
 
 <div id="tb-calendar" class="border rounded"></div>
 
 <script id="tb-events-json" type="application/json">{{ events_json | safe }}</script>
+<script id="tb-prefs-json" type="application/json">{{ prefs_json | safe }}</script>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -40,14 +71,104 @@
     document.addEventListener('DOMContentLoaded', function() {
       var el = document.getElementById('tb-calendar');
       var raw = document.getElementById('tb-events-json');
+      var rawPrefs = document.getElementById('tb-prefs-json');
       var events = [];
+      var prefs = { filters: {}, view: 'dayGridMonth' };
       try {
         events = JSON.parse(raw.textContent || '[]');
       } catch (e) {
         events = [];
       }
 
+      try {
+        prefs = JSON.parse(rawPrefs.textContent || '{}') || prefs;
+      } catch (e) {
+        prefs = prefs;
+      }
+
       if (!el || !window.FullCalendar) return;
+
+      // Apply server-provided defaults if missing.
+      prefs.filters = prefs.filters || {};
+      if (!prefs.view) prefs.view = 'dayGridMonth';
+
+      function currentFiltersFromUI() {
+        var out = {};
+        document.querySelectorAll('.tb-cal-filter').forEach(function(cb) {
+          var key = cb.getAttribute('data-filter');
+          if (!key) return;
+          out[key] = !!cb.checked;
+        });
+        return out;
+      }
+
+      function setUIFromPrefs() {
+        document.querySelectorAll('.tb-cal-filter').forEach(function(cb) {
+          var key = cb.getAttribute('data-filter');
+          if (!key) return;
+          if (prefs.filters && (key in prefs.filters)) {
+            cb.checked = !!prefs.filters[key];
+          }
+        });
+      }
+
+      var saveTimer = null;
+      function savePrefs() {
+        if (saveTimer) window.clearTimeout(saveTimer);
+        saveTimer = window.setTimeout(function() {
+          try {
+            fetch('/ui/prefs/calendar', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ filters: prefs.filters || {}, view: prefs.view || 'dayGridMonth' })
+            }).catch(function(){});
+          } catch (e) {
+            // ignore
+          }
+        }, 250);
+      }
+
+      function eventCategory(ev) {
+        try {
+          var p = ev.extendedProps || {};
+          var st = (p.status || '').toString().toLowerCase();
+          if (st === 'completed') return 'completed';
+          if (st === 'deleted') return 'deleted';
+          return (p.time_left_class || '').toString();
+        } catch (e) {
+          return '';
+        }
+      }
+
+      function applyFilters(calendar) {
+        if (!calendar) return;
+        var filters = prefs.filters || {};
+        var apply = function() {
+          calendar.getEvents().forEach(function(ev) {
+            var cat = eventCategory(ev);
+            var ok = true;
+            if (cat && (cat in filters)) {
+              ok = !!filters[cat];
+            }
+            try {
+              ev.setProp('display', ok ? 'auto' : 'none');
+            } catch (e) {
+              // ignore
+            }
+          });
+        };
+
+        try {
+          if (calendar.batchRendering) {
+            calendar.batchRendering(apply);
+          } else {
+            apply();
+          }
+        } catch (e) {
+          apply();
+        }
+      }
 
       function buildConfig(includeYear) {
         var right = includeYear
@@ -65,7 +186,11 @@
 
         return {
           timeZone: "{{ app_timezone or 'local' }}",
-          initialView: 'dayGridMonth',
+          initialView: (function(){
+            var v = (prefs.view || 'dayGridMonth');
+            if (!includeYear && v === 'multiMonthYear') return 'dayGridMonth';
+            return v;
+          })(),
           height: 'auto',
           nowIndicator: true,
           navLinks: true,
@@ -90,6 +215,17 @@
             var due = p.due_display ? ('\nDue: ' + p.due_display) : '';
             var tl = p.time_left ? ('\nTime left: ' + p.time_left) : '';
             info.el.title = tt + info.event.title + st + due + tl;
+          },
+          datesSet: function(arg) {
+            try {
+              var v = arg && arg.view ? arg.view.type : null;
+              if (v && prefs.view !== v) {
+                prefs.view = v;
+                savePrefs();
+              }
+            } catch (e) {
+              // ignore
+            }
           }
         };
       }
@@ -103,6 +239,19 @@
       }
 
       calendar.render();
+
+      // Initialize UI state and apply filters.
+      setUIFromPrefs();
+      prefs.filters = currentFiltersFromUI();
+      applyFilters(calendar);
+
+      document.querySelectorAll('.tb-cal-filter').forEach(function(cb) {
+        cb.addEventListener('change', function() {
+          prefs.filters = currentFiltersFromUI();
+          applyFilters(calendar);
+          savePrefs();
+        });
+      });
     });
   </script>
 {% endblock %}

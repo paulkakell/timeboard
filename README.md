@@ -2,7 +2,7 @@
 
 A lightweight, dockerized task board that supports recurrence intervals shorter than a day.
 
-Current version: **00.07.00**
+Current version: **00.08.00**
 
 Repository:
 - https://github.com/paulkakell/timeboard
@@ -17,6 +17,7 @@ Repository:
 - Mobile-friendly and desktop-friendly web UI (auto-detects mobile devices; footer link to switch to desktop).
 - Light/Dark/System themes.
 - Task Type filtering and sorting.
+- Calendar view with color-coded due-state filtering (per-user, persisted).
 - Archived view for completed/deleted tasks (restore archived tasks back to active).
 - Admin user management:
   - create/delete users
@@ -25,7 +26,7 @@ Repository:
   - export/import database JSON
 - Email features (when SMTP is configured in the admin UI):
   - hourly overdue reminders
-  - password reset via email ("Forgot Email?" link)
+  - password reset via email ("Reset password" link)
   - login using username or email address
 - Per-user notification services (each service entry generates a routing tag; tasks with that tag send notifications on create/update/past due/complete/archive):
   - Browser notifications (SSE)
@@ -58,10 +59,35 @@ On first run, Timeboard creates an `admin` account and prints the password in th
 
 ```bash
 docker logs -f timeboard
+```
 
 On first run (fresh database file), Timeboard also seeds a small set of demo tasks/tags under the initial admin account.
 You can remove all seeded/user data via **Admin → Database → Purge All**.
+
+## Resetting a forgotten admin password
+
+If email is enabled and the admin account has an email address on file, use the **Reset password** link on the login page.
+
+If email is not enabled (or the account has no email address), you can reset the admin password from the server/host with direct access to the SQLite database.
+
+Docker Compose:
+
+```bash
+# Prints a new random password to stdout
+docker compose exec timeboard python -m app.cli reset-admin
+
+# Or set a specific password (won't print unless you add --print)
+docker compose exec timeboard python -m app.cli reset-admin --password "NewStrongPasswordHere" --print
 ```
+
+Bare metal (same machine as the app):
+
+```bash
+export TIMEBOARD_SETTINGS=/path/to/settings.yml
+python -m app.cli reset-admin
+```
+
+After resetting, sign in as `admin` with the new password and change it in **Profile → Password**.
 
 ## Configuration
 

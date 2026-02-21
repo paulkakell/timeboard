@@ -96,6 +96,11 @@ def ensure_db_schema(engine: Engine) -> MigrationReport:
             conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255)"))
             applied.append("alter_table:users:add_column:email")
 
+        # Add users.ui_prefs_json (nullable, JSON string) for per-user UI state.
+        if _table_exists(conn, "users") and not _column_exists(conn, "users", "ui_prefs_json"):
+            conn.execute(text("ALTER TABLE users ADD COLUMN ui_prefs_json TEXT"))
+            applied.append("alter_table:users:add_column:ui_prefs_json")
+
         # Ensure unique index for users.email (helps older DBs where constraint didn't exist).
         # NOTE: SQLite allows multiple NULLs in UNIQUE indexes, which is what we want.
         if _table_exists(conn, "users"):
