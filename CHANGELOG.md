@@ -1,6 +1,19 @@
 # Changelog
 
 
+## 00.10.00
+
+- Additive: Demo mode in settings.yml (`demo.enabled`) to run Timeboard as a safe public demo.
+- Additive: Robust seeded demo dataset themed as "Dunder Mifflin Paper Company, Inc".
+  - Seeds users with manager/subordinate hierarchy, assigned tasks, task follows, nested subtasks, recurrence patterns, and in-app notifications.
+- Additive: Automatic demo reset job (`demo.reset_interval_minutes`) that purges + rebuilds the demo dataset on a schedule.
+- Fix/Security: Outbound notification integrations (email/webhooks/API/discord/gotify/ntfy/WNS) are blocked when `demo.disable_external_apis` is enabled.
+
+Compatibility: Backward compatible (no DB schema changes).
+
+Refs: Issue N/A, Commit N/A
+
+
 ## 00.09.00
 
 - Additive: Global task search (navbar) that searches across task fields and tags.

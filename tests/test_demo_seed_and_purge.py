@@ -9,6 +9,7 @@ from app.crud import create_password_reset_token, create_task, create_user
 from app.db import Base
 from app.db_admin import purge_all_data
 from app.demo_data import seed_demo_data
+from app.demo_dunder_mifflin import reset_to_dunder_mifflin_demo
 from app.migrations import ensure_db_schema
 from app.models import (
     NotificationEvent,
@@ -51,6 +52,11 @@ email:
   from_address: ""
   reminder_interval_minutes: 60
   reset_token_minutes: 60
+
+demo:
+  enabled: false
+  reset_interval_minutes: 0
+  disable_external_apis: true
 """.lstrip()
     )
     monkeypatch.setenv("TIMEBOARD_SETTINGS", str(path))
@@ -157,5 +163,56 @@ def test_purge_all_data_deletes_tasks_tags_notifications_but_keeps_users(setting
 
         # Users preserved
         assert db.query(User).count() == 1
+    finally:
+        db.close()
+
+
+def test_dunder_demo_reset_seeds_org_chart_tasks_and_notifications(settings_tmp, tmp_path):
+    db_path = tmp_path / "dunder.db"
+    engine = make_engine(str(db_path))
+    init_full_schema(engine)
+
+    db = make_session(engine)
+    try:
+        res = reset_to_dunder_mifflin_demo(db)
+        assert res.get("seeded") == 1
+        assert int(res.get("users_created") or 0) >= 10
+        assert int(res.get("tasks_created") or 0) >= 5
+        assert int(res.get("notifications_created") or 0) >= 1
+
+        # Manager/subordinate relationship should exist.
+        michael = db.query(User).filter(User.username == "michael").first()
+        jim = db.query(User).filter(User.username == "jim").first()
+        assert michael is not None
+        assert jim is not None
+        assert int(jim.manager_id or 0) == int(michael.id)
+
+        # Nested subtasks should exist.
+        parent = db.query(Task).filter(Task.name == "Quarterly financial close").first()
+        assert parent is not None
+        children = db.query(Task).filter(Task.parent_task_id == int(parent.id)).all()
+        assert len(children) >= 1
+    finally:
+        db.close()
+
+
+def test_demo_mode_forces_external_services_disabled(settings_tmp, tmp_path, monkeypatch):
+    # Enable demo mode.
+    path = settings_tmp
+    raw = path.read_text(encoding="utf-8")
+    raw = raw.replace("demo:\n  enabled: false", "demo:\n  enabled: true")
+    path.write_text(raw, encoding="utf-8")
+    monkeypatch.setenv("TIMEBOARD_SETTINGS", str(path))
+    get_settings.cache_clear()
+
+    db_path = tmp_path / "demo_block.db"
+    engine = make_engine(str(db_path))
+    init_full_schema(engine)
+
+    db = make_session(engine)
+    try:
+        u = create_user(db, username="admin", password="demo", is_admin=True)
+        svc = create_user_notification_service(db, user_id=int(u.id), service_type="webhook", enabled=True, config={"url": "https://example.invalid"})
+        assert svc.enabled is False
     finally:
         db.close()

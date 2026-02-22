@@ -16,6 +16,11 @@ purge:
   default_days: 15                # Default purge window for archived tasks (per-user override exists)
   interval_minutes: 60            # How often to purge archived tasks
 
+demo:
+  enabled: false                  # If true, enables automatic demo reset + safe guards
+  reset_interval_minutes: 360     # How often to wipe + rebuild the demo dataset (0 disables)
+  disable_external_apis: true     # Disables outbound notifications/webhooks/email
+
 email:
   # Email settings are stored in the database and managed from the Admin UI.
   # These values are only used to SEED the database on first run (or when the

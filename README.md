@@ -106,6 +106,9 @@ Common settings:
 - `database.path`: SQLite DB file path (default `/data/timeboard.db`).
 - `purge.default_days`: default purge window for archived tasks.
 - `purge.interval_minutes`: how often the purge job runs.
+- `demo.enabled`: when true, Timeboard runs as a self-resetting demo instance.
+- `demo.reset_interval_minutes`: how often the demo dataset is wiped + rebuilt.
+- `demo.disable_external_apis`: blocks outbound notifications/webhooks/email in demo mode.
 - `email.*`: legacy seed values (copied into the database on first run if no DB settings exist). Runtime configuration is managed in the admin UI (SMTP or SendGrid).
 
 Docker note (SMTP): if Timeboard is running in a container, setting the SMTP host to `localhost` / `127.0.0.1` will try to connect to the container itself.

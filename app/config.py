@@ -66,6 +66,18 @@ class LoggingSettings(BaseModel):
     level: str = "INFO"
 
 
+class DemoSettings(BaseModel):
+    # When enabled, the application behaves as an always-resetting demo instance.
+    enabled: bool = False
+
+    # How often to purge + rebuild demo data.
+    # Set to 0 to disable automatic resets.
+    reset_interval_minutes: int = 360
+
+    # Prevent abuse by disabling outbound notifications/webhooks/email.
+    disable_external_apis: bool = True
+
+
 class Settings(BaseModel):
     app: AppSettings = Field(default_factory=AppSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
@@ -73,6 +85,7 @@ class Settings(BaseModel):
     purge: PurgeSettings = Field(default_factory=PurgeSettings)
     email: EmailSettings = Field(default_factory=EmailSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    demo: DemoSettings = Field(default_factory=DemoSettings)
 
 
 def _ensure_settings_file(path: str) -> None:
@@ -93,6 +106,7 @@ def _ensure_settings_file(path: str) -> None:
             "security:\n  session_secret: 'CHANGE_ME_SESSION_SECRET'\n  jwt_secret: 'CHANGE_ME_JWT_SECRET'\n"
             "database:\n  path: '/data/timeboard.db'\n"
             "purge:\n  default_days: 15\n  interval_minutes: 60\n"
+            "demo:\n  enabled: false\n  reset_interval_minutes: 360\n  disable_external_apis: true\n"
             "email:\n  enabled: false\n  provider: 'smtp'\n  smtp_host: ''\n  smtp_port: 587\n  smtp_username: ''\n  smtp_password: ''\n  smtp_from: 'timeboard@localhost'\n  use_tls: true\n  sendgrid_api_key: ''\n  reminder_interval_minutes: 60\n  reset_token_minutes: 60\n"
         )
 
