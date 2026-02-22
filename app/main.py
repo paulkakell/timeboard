@@ -17,6 +17,7 @@ from .crud import create_user, purge_archived_tasks
 from .db_admin import backup_database_json, get_auto_backup_settings, purge_backup_files
 from .db import Base, SessionLocal, engine
 from .demo_data import seed_demo_data
+from .demo_dunder_mifflin import reset_to_dunder_mifflin_demo
 from .emailer import build_overdue_reminder_email, email_enabled, send_email
 from .logging_setup import apply_log_level, purge_old_logs, setup_logging
 from .meta_settings import (
@@ -457,26 +458,34 @@ def on_startup() -> None:
     # Ensure first-run admin.
     db = SessionLocal()
     try:
-        if db.query(User).count() == 0:
-            admin_password = secrets.token_urlsafe(12)
-            create_user(db, username="admin", password=admin_password, is_admin=True)
-            logger.warning("============================================================")
-            logger.warning("Timeboard initial admin account created")
-            logger.warning("Username: admin")
-            logger.warning("Password: %s", admin_password)
-            logger.warning("Please log in and change this password.")
-            logger.warning("============================================================")
-
-        # Seed demo tasks/tags for true first-run installs.
-        if is_fresh_db_file:
+        if getattr(settings, "demo", None) and bool(getattr(settings.demo, "enabled", False)):
+            # Demo mode: rebuild the DB into a known-safe demo dataset.
             try:
-                admin_user = db.query(User).filter(User.username == "admin").first() or db.query(User).first()
-                if admin_user:
-                    result = seed_demo_data(db, owner=admin_user)
-                    if result.get("seeded"):
-                        logger.info("Seeded demo data (tasks_created=%s)", result.get("tasks_created"))
+                result = reset_to_dunder_mifflin_demo(db)
+                logger.warning("Demo mode enabled: database reset + reseeded (%s)", result)
             except Exception:
-                logger.exception("Failed to seed demo data")
+                logger.exception("Failed to build demo dataset")
+        else:
+            if db.query(User).count() == 0:
+                admin_password = secrets.token_urlsafe(12)
+                create_user(db, username="admin", password=admin_password, is_admin=True)
+                logger.warning("============================================================")
+                logger.warning("Timeboard initial admin account created")
+                logger.warning("Username: admin")
+                logger.warning("Password: %s", admin_password)
+                logger.warning("Please log in and change this password.")
+                logger.warning("============================================================")
+
+            # Seed demo tasks/tags for true first-run installs.
+            if is_fresh_db_file:
+                try:
+                    admin_user = db.query(User).filter(User.username == "admin").first() or db.query(User).first()
+                    if admin_user:
+                        result = seed_demo_data(db, owner=admin_user)
+                        if result.get("seeded"):
+                            logger.info("Seeded demo data (tasks_created=%s)", result.get("tasks_created"))
+                except Exception:
+                    logger.exception("Failed to seed demo data")
     finally:
         db.close()
 
@@ -500,6 +509,31 @@ def on_startup() -> None:
         minutes=int(settings.purge.interval_minutes),
         id="purge",
     )
+
+    # Demo reset job.
+    if getattr(settings, "demo", None) and bool(getattr(settings.demo, "enabled", False)):
+        def _demo_reset_job() -> None:
+            dbj = SessionLocal()
+            try:
+                res = reset_to_dunder_mifflin_demo(dbj)
+                logger.warning("Demo database reset (%s)", res)
+            except Exception:
+                logger.exception("Error while resetting demo database")
+            finally:
+                dbj.close()
+
+        try:
+            minutes = int(getattr(settings.demo, "reset_interval_minutes", 0) or 0)
+        except Exception:
+            minutes = 0
+        if minutes > 0:
+            scheduler.add_job(
+                _demo_reset_job,
+                "interval",
+                minutes=minutes,
+                id="demo_reset",
+                replace_existing=True,
+            )
 
     # Email reminder jobs (configurable via Admin → Email).
     try:

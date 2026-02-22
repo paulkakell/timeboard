@@ -325,6 +325,15 @@ def create_user_notification_service(
     """Create a new notification service entry and its routing tag."""
     st = _normalize_service_type(service_type)
 
+    # Demo safety: disallow enabling external services.
+    try:
+        s = get_settings()
+        if getattr(s, "demo", None) and bool(getattr(s.demo, "enabled", False)):
+            if bool(getattr(s.demo, "disable_external_apis", True)) and st != CHANNEL_BROWSER:
+                enabled = False
+    except Exception:
+        pass
+
     # Create a unique tag.
     tag = None
     for _ in range(10):
@@ -376,7 +385,16 @@ def update_user_notification_service(
     if name is not None:
         svc.name = str(name).strip() if str(name).strip() else None
     if enabled is not None:
-        svc.enabled = bool(enabled)
+        desired = bool(enabled)
+        # Demo safety: disallow enabling external services.
+        try:
+            s = get_settings()
+            if getattr(s, "demo", None) and bool(getattr(s.demo, "enabled", False)):
+                if bool(getattr(s.demo, "disable_external_apis", True)) and str(svc.service_type or "").lower() != CHANNEL_BROWSER:
+                    desired = False
+        except Exception:
+            pass
+        svc.enabled = desired
     if config is not None:
         svc.config_json = _json_dumps(config)
 
@@ -916,6 +934,16 @@ def _send_notification_via_service_impl(
     """
     st = str(svc.service_type or "").strip().lower()
     cfg = _json_loads(svc.config_json)
+
+    # Demo safety: disable outbound integrations.
+    try:
+        s = get_settings()
+        if getattr(s, "demo", None) and bool(getattr(s.demo, "enabled", False)):
+            if bool(getattr(s.demo, "disable_external_apis", True)) and st != CHANNEL_BROWSER:
+                logger.info("Demo mode: blocked external notification send (service_type=%s svc_id=%s)", st, getattr(svc, "id", None))
+                return
+    except Exception:
+        pass
 
     if st == CHANNEL_BROWSER:
         # Browser notifications are delivered via SSE from NotificationEvent rows.
