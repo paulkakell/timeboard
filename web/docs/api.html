@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API — TimeboardApp</title>
+  <meta name="description" content="TimeboardApp API: authentication, token usage, and example requests." />
+  <link rel="canonical" href="https://timeboardapp.com/docs/api.html" />
+  <link rel="icon" href="../assets/img/favicon.ico" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <a class="brand" href="/">
+        <img src="../assets/img/pwa-192.png" alt="TimeboardApp" />
+        <span>TimeboardApp</span>
+      </a>
+      <button class="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-nav-toggle>
+        Menu
+      </button>
+      <nav class="nav" data-nav>
+        <a href="/">Home</a>
+        <a class="active" href="/docs/">Docs</a>
+        <a href="/docs/getting-started.html">Get started</a>
+        <a href="/docs/deployment.html">Deploy</a>
+        <a class="active" href="/docs/api.html">API</a>
+        <a href="/docs/demo.html">Demo</a>
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <div class="kicker"><span class="dot"></span><span>Docs · API</span></div>
+        <h1>API</h1>
+        <p class="lead">TimeboardApp ships with a documented JSON API (OpenAPI). Use it for automation, integrations, and management workflows.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>API documentation</h2>
+        <p>On any running TimeboardApp instance, you can browse:</p>
+        <ul class="list">
+          <li><code>/docs</code> — Swagger UI</li>
+          <li><code>/openapi.json</code> — OpenAPI schema</li>
+        </ul>
+
+        <div class="callout">
+          <strong>Base URL</strong>
+          <div class="small">Examples below use <code>http://localhost:8888</code>. Replace with your deployment origin.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Authentication</h2>
+        <p>
+          The API uses a bearer token. First, exchange a username/password for an access token:
+        </p>
+
+        <div class="code"><pre><code>curl -X POST "http://localhost:8888/api/auth/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin&password=YOUR_PASSWORD"</code></pre></div>
+
+        <p>The response includes <code>access_token</code>. Use it as:</p>
+
+        <div class="code"><pre><code>Authorization: Bearer &lt;token&gt;</code></pre></div>
+
+        <p>Example:</p>
+        <div class="code"><pre><code>TOKEN="$(curl -s -X POST "http://localhost:8888/api/auth/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin&password=YOUR_PASSWORD" | python -c "import sys, json; print(json.load(sys.stdin)['access_token'])")"
+
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8888/api/auth/me"</code></pre></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Key endpoints</h2>
+        <table class="table">
+          <thead>
+            <tr><th>Area</th><th>Prefix</th><th>Notes</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Auth</td>
+              <td><code>/api/auth</code></td>
+              <td>Token issuance and current user</td>
+            </tr>
+            <tr>
+              <td>Tasks</td>
+              <td><code>/api/tasks</code></td>
+              <td>Create tasks, complete tasks, schedule recurrence, list by status</td>
+            </tr>
+            <tr>
+              <td>Tags</td>
+              <td><code>/api/tags</code></td>
+              <td>Manage tags and task/tag mappings</td>
+            </tr>
+            <tr>
+              <td>Notifications</td>
+              <td><code>/api/notifications</code></td>
+              <td>Notification services and user settings</td>
+            </tr>
+            <tr>
+              <td>Admin</td>
+              <td><code>/api/admin</code></td>
+              <td>Admin-only endpoints (export/import, user ops)</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p class="small">For exact request/response schemas, use <code>/docs</code> on your running instance.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="small">© <span id="y"></span> TimeboardApp</div>
+      <div class="small">
+        <a href="/docs/">Docs</a> ·
+        <a href="/license.html">License</a> ·
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('y').textContent = String(new Date().getFullYear());
+  </script>
+</body>
+</html>

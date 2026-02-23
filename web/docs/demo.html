@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Demo mode — TimeboardApp</title>
+  <meta name="description" content="TimeboardApp demo mode: periodic resets, public test deployments, and demo credentials." />
+  <link rel="canonical" href="https://timeboardapp.com/docs/demo.html" />
+  <link rel="icon" href="../assets/img/favicon.ico" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <a class="brand" href="/">
+        <img src="../assets/img/pwa-192.png" alt="TimeboardApp" />
+        <span>TimeboardApp</span>
+      </a>
+      <button class="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-nav-toggle>
+        Menu
+      </button>
+      <nav class="nav" data-nav>
+        <a href="/">Home</a>
+        <a class="active" href="/docs/">Docs</a>
+        <a href="/docs/getting-started.html">Get started</a>
+        <a href="/docs/deployment.html">Deploy</a>
+        <a href="/docs/api.html">API</a>
+        <a class="active" href="/docs/demo.html">Demo</a>
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <div class="kicker"><span class="dot"></span><span>Docs · Demo mode</span></div>
+        <h1>Demo mode</h1>
+        <p class="lead">Run a public test environment safely: periodic resets, optional outbound restrictions, and clear user-facing messaging.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>What demo mode does</h2>
+        <ul class="list">
+          <li>Seeds the database with a demo dataset (including an admin user)</li>
+          <li>Optionally resets the dataset on an interval</li>
+          <li>Can block outbound integrations (email/webhook push) to prevent abuse</li>
+          <li>Shows a prominent demo warning and demo credentials on the login page</li>
+        </ul>
+
+        <div class="callout">
+          <strong>User-facing behavior</strong>
+          <div class="small">When demo mode is enabled, the login page displays: <em>THIS IS A DEMO ENVIRONMENT AND PERIODICALLY RESET</em> and the demo admin username/password.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Suggested demo configuration</h2>
+        <div class="code"><pre><code>demo:
+  enabled: true
+  reset_interval_minutes: 360
+  disable_external_apis: true</code></pre></div>
+
+        <p class="small">
+          The demo reset interval determines how frequently the database is re-seeded.
+          Disabling external APIs prevents the demo instance from being used to send emails or arbitrary webhook traffic.
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Demo credentials</h2>
+        <p>Default demo admin credentials:</p>
+        <div class="code"><pre><code>username: admin
+password: demo</code></pre></div>
+
+        <p class="small">If you change the demo password, update your demo dataset or reset interval accordingly.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="small">© <span id="y"></span> TimeboardApp</div>
+      <div class="small">
+        <a href="/docs/">Docs</a> ·
+        <a href="/license.html">License</a> ·
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('y').textContent = String(new Date().getFullYear());
+  </script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TimeboardApp — Lightweight recurring task board</title>
+  <meta name="description" content="TimeboardApp is a lightweight, dockerized task board with powerful recurrence (sub-daily intervals, time slots, fixed clock schedules), a mobile-friendly UI, and a documented API." />
+  <meta name="theme-color" content="#0b1220" />
+
+  <link rel="canonical" href="https://timeboardapp.com/" />
+
+  <meta property="og:title" content="TimeboardApp" />
+  <meta property="og:description" content="A lightweight recurring task board: sub-daily recurrence, time slots, fixed clock schedules, mobile UI, API." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://timeboardapp.com/" />
+
+  <link rel="icon" href="assets/img/favicon.ico" />
+  <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png" />
+
+  <link rel="stylesheet" href="assets/css/styles.css" />
+  <script src="assets/js/site.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <a class="brand" href="/">
+        <img src="assets/img/pwa-192.png" alt="TimeboardApp" />
+        <span>TimeboardApp</span>
+      </a>
+
+      <button class="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-nav-toggle>
+        Menu
+      </button>
+
+      <nav class="nav" data-nav>
+        <a class="active" href="/">Home</a>
+        <a href="/docs/">Docs</a>
+        <a href="/docs/getting-started.html">Get started</a>
+        <a href="/docs/deployment.html">Deploy</a>
+        <a href="/docs/api.html">API</a>
+        <a href="/docs/demo.html">Demo</a>
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <div class="kicker"><span class="dot"></span><span>Recurring tasks that work below the day level</span></div>
+          <h1>TimeboardApp</h1>
+          <p class="lead">
+            A lightweight, dockerized task board built for schedules like “every 8 hours after completion”, “at 08:00/15:00/23:00”, and
+            fixed clock intervals. Mobile-friendly UI, SQLite storage, and a full OpenAPI-documented API.
+          </p>
+          <div class="actions">
+            <a class="btn primary" href="/docs/getting-started.html">Get started</a>
+            <a class="btn" href="/docs/architecture.html">How it works</a>
+            <a class="btn" href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">View on GitHub</a>
+          </div>
+
+          <hr class="sep" />
+
+          <div class="grid cols-3">
+            <div class="card">
+              <div class="badge">Recurrence</div>
+              <h3>Sub‑daily intervals</h3>
+              <p>Post-completion intervals (e.g. every 8h after you check it off) and fixed-clock schedules (anchored to the due time).</p>
+            </div>
+            <div class="card">
+              <div class="badge">UI</div>
+              <h3>Mobile + desktop</h3>
+              <p>Responsive UI with theme support, calendar view, filters, and per-user preferences.</p>
+            </div>
+            <div class="card">
+              <div class="badge">API</div>
+              <h3>Documented</h3>
+              <p>OpenAPI/Swagger documentation included. Automate tasks, notifications, and integrations.</p>
+            </div>
+          </div>
+        </div>
+
+        <aside class="card">
+          <h3>Quick start (Docker)</h3>
+          <p class="small">Run locally with Docker Compose. Defaults to <strong>http://localhost:8888</strong>.</p>
+          <div class="code"><pre><code>docker compose up --build</code></pre></div>
+
+          <div class="callout">
+            <strong>Demo mode</strong>
+            <div class="small">Enable demo safeguards + auto-reset for public test instances. The login page will display demo credentials.</div>
+          </div>
+
+          <hr class="sep" />
+
+          <h3>What it is</h3>
+          <ul class="list">
+            <li>FastAPI backend + server-rendered HTML templates</li>
+            <li>SQLite database on a Docker volume</li>
+            <li>Background jobs for reminders, demo resets, and purging</li>
+            <li>Notification channels: browser (SSE), email, webhook, Gotify, ntfy, WNS</li>
+          </ul>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Core features</h2>
+        <p>TimeboardApp focuses on repeatable work. Recurrence is first-class, and the app is designed to stay simple to deploy and maintain.</p>
+
+        <div class="grid cols-3">
+          <div class="card">
+            <h3>Task board + calendar</h3>
+            <p>Dashboard list view for day-to-day work and a calendar view for schedule clarity and planning.</p>
+          </div>
+          <div class="card">
+            <h3>Admin controls</h3>
+            <p>User management, database export/import, email settings, logging retention, and operational utilities.</p>
+          </div>
+          <div class="card">
+            <h3>Notifications</h3>
+            <p>Per-user notification services and tags. Delivery is asynchronous and events are auditable via the API.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Documentation</h2>
+        <p>Start here if you are evaluating the project, setting it up, or deploying it behind a reverse proxy.</p>
+        <div class="grid cols-3">
+          <a class="card" href="/docs/getting-started.html">
+            <div class="badge">Docs</div>
+            <h3>Getting started</h3>
+            <p>Install, run with Docker, and sign in. Includes first-run admin password guidance.</p>
+          </a>
+          <a class="card" href="/docs/configuration.html">
+            <div class="badge">Docs</div>
+            <h3>Configuration</h3>
+            <p>Settings file layout, environment variables, demo mode, and operational defaults.</p>
+          </a>
+          <a class="card" href="/docs/deployment.html">
+            <div class="badge">Docs</div>
+            <h3>Deployment</h3>
+            <p>Reverse proxy, base URL, TLS, backups, and production hardening notes.</p>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="small">© <span id="y"></span> TimeboardApp. MIT licensed.</div>
+      <div class="small">
+        <a href="/docs/">Docs</a> ·
+        <a href="/license.html">License</a> ·
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('y').textContent = String(new Date().getFullYear());
+  </script>
+</body>
+</html>
