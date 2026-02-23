@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Configuration — TimeboardApp</title>
+  <meta name="description" content="TimeboardApp configuration: settings.yml, environment variables, secrets, base URL, and demo mode." />
+  <link rel="canonical" href="https://timeboardapp.com/docs/configuration.html" />
+  <link rel="icon" href="../assets/img/favicon.ico" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <a class="brand" href="/">
+        <img src="../assets/img/pwa-192.png" alt="TimeboardApp" />
+        <span>TimeboardApp</span>
+      </a>
+      <button class="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-nav-toggle>
+        Menu
+      </button>
+      <nav class="nav" data-nav>
+        <a href="/">Home</a>
+        <a class="active" href="/docs/">Docs</a>
+        <a href="/docs/getting-started.html">Get started</a>
+        <a href="/docs/deployment.html">Deploy</a>
+        <a href="/docs/api.html">API</a>
+        <a href="/docs/demo.html">Demo</a>
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <div class="kicker"><span class="dot"></span><span>Docs · Configuration</span></div>
+        <h1>Configuration</h1>
+        <p class="lead">TimeboardApp is configured with a YAML settings file plus optional environment variable overrides for secrets and URLs.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Settings file</h2>
+        <p>
+          The app reads a YAML file (default path: <code>/data/settings.yml</code> in Docker). If the file is missing, TimeboardApp creates a minimal one.
+          A full example is included as <code>settings.sample.yml</code> in the repository.
+        </p>
+
+        <div class="code"><pre><code>app:
+  name: "TimeboardApp"
+  timezone: "America/Denver"
+  host: "0.0.0.0"
+  port: 8888
+  base_url: ""</code></pre></div>
+
+        <p class="small">For production deployments behind TLS, set <code>base_url</code> to your external URL (for example, <code>https://timeboardapp.com</code> for the public site or your own domain for the app instance).</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Environment variables</h2>
+        <p>
+          For container deployments, it is common to keep secrets out of the YAML file and override them via environment variables.
+          TimeboardApp supports the following overrides:
+        </p>
+
+        <table class="table">
+          <thead>
+            <tr><th>Variable</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>TIMEBOARDAPP_SETTINGS</code></td>
+              <td>Path to settings.yml. Default: <code>/data/settings.yml</code>.</td>
+            </tr>
+            <tr>
+              <td><code>TIMEBOARDAPP_SESSION_SECRET</code></td>
+              <td>Overrides <code>security.session_secret</code> (UI session cookie signing).</td>
+            </tr>
+            <tr>
+              <td><code>TIMEBOARDAPP_JWT_SECRET</code></td>
+              <td>Overrides <code>security.jwt_secret</code> (API token signing).</td>
+            </tr>
+            <tr>
+              <td><code>TIMEBOARDAPP_BASE_URL</code></td>
+              <td>Overrides <code>app.base_url</code> (used in external links/notifications).</td>
+            </tr>
+            <tr>
+              <td><code>TIMEBOARDAPP_PORT</code> / <code>PORT</code></td>
+              <td>Overrides <code>app.port</code> (useful in certain orchestrators).</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>Compatibility</strong>
+          <div class="small">Legacy environment variable names (without the <code>APP</code> suffix) are still accepted for upgrades.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Database</h2>
+        <p>
+          The default database is SQLite. In Docker, store it on a volume (for example <code>./data</code> mounted to <code>/data</code>).
+          Backups can be done by copying the database file while the container is stopped.
+        </p>
+
+        <div class="code"><pre><code>database:
+  path: "/data/timeboardapp.db"</code></pre></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Demo mode</h2>
+        <p>
+          Demo mode is intended for public test environments. When enabled, TimeboardApp can periodically reset the demo dataset and disable outbound integrations.
+        </p>
+        <div class="code"><pre><code>demo:
+  enabled: true
+  reset_interval_minutes: 360
+  disable_external_apis: true</code></pre></div>
+
+        <p class="small">See <a href="/docs/demo.html">Demo mode</a> for operational notes and user-facing behavior.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="small">© <span id="y"></span> TimeboardApp</div>
+      <div class="small">
+        <a href="/docs/">Docs</a> ·
+        <a href="/license.html">License</a> ·
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('y').textContent = String(new Date().getFullYear());
+  </script>
+</body>
+</html>

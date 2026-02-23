@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Security — TimeboardApp</title>
+  <meta name="description" content="TimeboardApp security guidance: secrets, demo safeguards, and deployment recommendations." />
+  <link rel="canonical" href="https://timeboardapp.com/docs/security.html" />
+  <link rel="icon" href="../assets/img/favicon.ico" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <a class="brand" href="/">
+        <img src="../assets/img/pwa-192.png" alt="TimeboardApp" />
+        <span>TimeboardApp</span>
+      </a>
+      <button class="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-nav-toggle>
+        Menu
+      </button>
+      <nav class="nav" data-nav>
+        <a href="/">Home</a>
+        <a class="active" href="/docs/">Docs</a>
+        <a href="/docs/getting-started.html">Get started</a>
+        <a href="/docs/deployment.html">Deploy</a>
+        <a href="/docs/api.html">API</a>
+        <a href="/docs/demo.html">Demo</a>
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <div class="kicker"><span class="dot"></span><span>Docs · Security</span></div>
+        <h1>Security</h1>
+        <p class="lead">Operational security guidance for self-hosting TimeboardApp.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Secrets</h2>
+        <p>
+          TimeboardApp uses two important secrets:
+        </p>
+        <ul class="list">
+          <li><strong>Session secret</strong> — signs UI session cookies</li>
+          <li><strong>JWT secret</strong> — signs API bearer tokens</li>
+        </ul>
+
+        <p>
+          Generate strong random values for both. In production, prefer environment variables to keep secrets out of files.
+        </p>
+
+        <div class="code"><pre><code>export TIMEBOARDAPP_SESSION_SECRET="..."
+export TIMEBOARDAPP_JWT_SECRET="..."</code></pre></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Demo mode safeguards</h2>
+        <p>
+          Demo mode is convenient for public testing but should be treated as untrusted traffic.
+          If you run a public demo, enable outbound restrictions.
+        </p>
+
+        <div class="code"><pre><code>demo:
+  enabled: true
+  disable_external_apis: true</code></pre></div>
+
+        <div class="callout">
+          <strong>Reset + transparency</strong>
+          <div class="small">Demo mode surfaces a warning on the login page to reduce user confusion about periodic resets.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Reverse proxy + TLS</h2>
+        <p>
+          For Internet-facing deployments, terminate TLS at a reverse proxy and keep TimeboardApp on a private network.
+          Ensure your proxy forwards the standard headers so the app can generate correct external links.
+        </p>
+
+        <ul class="list">
+          <li>Use HTTPS (TLS) for all public access</li>
+          <li>Set <code>app.base_url</code> to the external HTTPS origin</li>
+          <li>Restrict admin access if needed (IP allowlists, SSO gateways)</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="small">© <span id="y"></span> TimeboardApp</div>
+      <div class="small">
+        <a href="/docs/">Docs</a> ·
+        <a href="/license.html">License</a> ·
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('y').textContent = String(new Date().getFullYear());
+  </script>
+</body>
+</html>

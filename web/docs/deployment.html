@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deployment — TimeboardApp</title>
+  <meta name="description" content="Deploy TimeboardApp behind a reverse proxy with TLS, configure base_url, and manage backups and upgrades." />
+  <link rel="canonical" href="https://timeboardapp.com/docs/deployment.html" />
+  <link rel="icon" href="../assets/img/favicon.ico" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <a class="brand" href="/">
+        <img src="../assets/img/pwa-192.png" alt="TimeboardApp" />
+        <span>TimeboardApp</span>
+      </a>
+      <button class="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-nav-toggle>
+        Menu
+      </button>
+      <nav class="nav" data-nav>
+        <a href="/">Home</a>
+        <a class="active" href="/docs/">Docs</a>
+        <a href="/docs/getting-started.html">Get started</a>
+        <a class="active" href="/docs/deployment.html">Deploy</a>
+        <a href="/docs/api.html">API</a>
+        <a href="/docs/demo.html">Demo</a>
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <div class="kicker"><span class="dot"></span><span>Docs · Deployment</span></div>
+        <h1>Deployment</h1>
+        <p class="lead">Production deployment guidance: reverse proxy, TLS, base URLs, backups, and upgrades.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Recommended production shape</h2>
+        <div class="grid cols-3">
+          <div class="card">
+            <div class="badge">Network</div>
+            <h3>Reverse proxy</h3>
+            <p>Run TimeboardApp on an internal port (8888) and terminate TLS at Nginx/Caddy/Traefik.</p>
+          </div>
+          <div class="card">
+            <div class="badge">Storage</div>
+            <h3>Persistent volume</h3>
+            <p>Mount <code>/data</code> to persist <code>settings.yml</code> and the SQLite database.</p>
+          </div>
+          <div class="card">
+            <div class="badge">Secrets</div>
+            <h3>Env overrides</h3>
+            <p>Provide secrets via environment variables to keep them out of the repository.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Base URL (important)</h2>
+        <p>
+          If TimeboardApp is served behind a reverse proxy (for example at <code>https://tasks.example.com</code>), set <code>app.base_url</code>
+          (or <code>TIMEBOARDAPP_BASE_URL</code>) so that external notifications and links use the correct host.
+        </p>
+
+        <div class="code"><pre><code>app:
+  base_url: "https://tasks.example.com"</code></pre></div>
+
+        <div class="callout">
+          <strong>Cookies and redirects</strong>
+          <div class="small">If the base URL does not match your public origin, you may see login redirects or incorrect links in emails/webhooks.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Reverse proxy notes</h2>
+        <p>TimeboardApp is a standard HTTP app. A reverse proxy should:</p>
+        <ul class="list">
+          <li>Forward <code>Host</code> and <code>X-Forwarded-Proto</code> headers</li>
+          <li>Support WebSockets or SSE if you use browser notifications (Server-Sent Events)</li>
+          <li>Increase timeouts for long-lived connections if required</li>
+        </ul>
+
+        <p class="small">Example (Nginx) — illustrative only:</p>
+        <div class="code"><pre><code>location / {
+  proxy_pass http://127.0.0.1:8888;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}</code></pre></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Backups</h2>
+        <p>
+          SQLite backups are straightforward. Stop the container (or ensure no writes), then copy the database file from the mounted volume.
+          For example, if you mount <code>./data</code> to <code>/data</code>, copy <code>./data/timeboardapp.db</code>.
+        </p>
+
+        <div class="callout">
+          <strong>Export/Import</strong>
+          <div class="small">The Admin UI also supports export/import workflows for migrations and recovery.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Upgrades</h2>
+        <p>Recommended upgrade pattern:</p>
+        <ol class="list">
+          <li>Backup your database and settings volume</li>
+          <li>Pull the latest image (or rebuild)</li>
+          <li>Start the container and review logs</li>
+          <li>Validate UI + API functionality</li>
+        </ol>
+
+        <p class="small">TimeboardApp includes lightweight schema migration logic on startup.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="small">© <span id="y"></span> TimeboardApp</div>
+      <div class="small">
+        <a href="/docs/">Docs</a> ·
+        <a href="/license.html">License</a> ·
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('y').textContent = String(new Date().getFullYear());
+  </script>
+</body>
+</html>

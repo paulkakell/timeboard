@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Architecture — TimeboardApp</title>
+  <meta name="description" content="TimeboardApp architecture: FastAPI, templates, SQLite, background jobs, and notifications." />
+  <link rel="canonical" href="https://timeboardapp.com/docs/architecture.html" />
+  <link rel="icon" href="../assets/img/favicon.ico" />
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <a class="brand" href="/">
+        <img src="../assets/img/pwa-192.png" alt="TimeboardApp" />
+        <span>TimeboardApp</span>
+      </a>
+      <button class="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-nav-toggle>
+        Menu
+      </button>
+      <nav class="nav" data-nav>
+        <a href="/">Home</a>
+        <a class="active" href="/docs/">Docs</a>
+        <a href="/docs/getting-started.html">Get started</a>
+        <a href="/docs/deployment.html">Deploy</a>
+        <a href="/docs/api.html">API</a>
+        <a href="/docs/demo.html">Demo</a>
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <div class="kicker"><span class="dot"></span><span>Docs · Architecture</span></div>
+        <h1>Architecture</h1>
+        <p class="lead">A small, practical architecture: FastAPI + templates, SQLite storage, background jobs for recurrence and reminders.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>High-level components</h2>
+        <div class="grid cols-3">
+          <div class="card">
+            <div class="badge">Backend</div>
+            <h3>FastAPI</h3>
+            <p>Serves both server-rendered pages (Jinja templates) and a JSON API. Authentication is session-based for the UI and JWT-based for the API.</p>
+          </div>
+          <div class="card">
+            <div class="badge">Storage</div>
+            <h3>SQLite + SQLAlchemy</h3>
+            <p>Single-file persistence on a volume. This keeps deployments simple while supporting common workloads.</p>
+          </div>
+          <div class="card">
+            <div class="badge">Jobs</div>
+            <h3>Background scheduler</h3>
+            <p>Runs periodic tasks: overdue reminders, purges, and demo resets. These jobs are part of the application lifecycle.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Task recurrence model</h2>
+        <p>TimeboardApp supports multiple recurrence styles:</p>
+        <ul class="list">
+          <li><strong>Interval after completion</strong> — e.g. “every 8 hours after you complete it”</li>
+          <li><strong>Fixed clock schedule</strong> — e.g. “at 08:00, 15:00, and 23:00 every day”</li>
+          <li><strong>Weekly/Monthly</strong> patterns with fixed due times</li>
+          <li><strong>Time slots</strong> for tasks that must occur in defined windows</li>
+        </ul>
+
+        <div class="callout">
+          <strong>Why it matters</strong>
+          <div class="small">Many task apps handle “daily” well, but struggle with sub-daily cadence. TimeboardApp treats time-of-day as a first-class scheduling concern.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Notifications</h2>
+        <p>
+          Notifications are configurable per user and can be delivered through multiple services: browser (SSE), email, generic webhooks,
+          Gotify, ntfy, and WNS. Notification settings are stored in the database.
+        </p>
+        <p class="small">Webhooks include a shared secret header for validation.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="small">© <span id="y"></span> TimeboardApp</div>
+      <div class="small">
+        <a href="/docs/">Docs</a> ·
+        <a href="/license.html">License</a> ·
+        <a href="https://github.com/paulkakell/timeboardapp" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('y').textContent = String(new Date().getFullYear());
+  </script>
+</body>
+</html>
