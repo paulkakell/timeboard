@@ -1,18 +1,20 @@
 services:
-  timeboard:
+  timeboardapp:
     build: .
-    container_name: ${CONTAINER_NAME}
-    dns:
-      - ${DNS1}
-      - ${DNS2}
-      - ${DNS3}
-      - ${DNS4}
+    container_name: ${CONTAINER_NAME:-timeboardapp}
     environment:
-      - TZ=${TZ}
-      - PGID=${PGID}
-      - PUID=${PUID}
+      - TZ=${TZ:-UTC}
+      - PGID=${PGID:-1000}
+      - PUID=${PUID:-1000}
+    networks:
+      - net_internal
     ports:
-      - ${PORT}:8888
+      - "${PORT:-8888}:8888"
     restart: unless-stopped
     volumes:
-      - ${CONFIG_DATA}:/data
+      - ${CONFIG_DATA:-./data}:/data
+
+networks:
+  net_internal:
+    external: true
+    name: ${INTERNAL_NETWORK:-net_internal}

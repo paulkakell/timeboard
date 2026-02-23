@@ -30,7 +30,7 @@ def settings_tmp(tmp_path, monkeypatch):
     path.write_text(
         f"""
 app:
-  name: "Timeboard"
+  name: "TimeboardApp"
   timezone: "UTC"
   base_url: ""
 security:
@@ -59,7 +59,7 @@ demo:
   disable_external_apis: true
 """.lstrip()
     )
-    monkeypatch.setenv("TIMEBOARD_SETTINGS", str(path))
+    monkeypatch.setenv("TIMEBOARDAPP_SETTINGS", str(path))
     get_settings.cache_clear()
     return path
 
@@ -202,7 +202,7 @@ def test_demo_mode_forces_external_services_disabled(settings_tmp, tmp_path, mon
     raw = path.read_text(encoding="utf-8")
     raw = raw.replace("demo:\n  enabled: false", "demo:\n  enabled: true")
     path.write_text(raw, encoding="utf-8")
-    monkeypatch.setenv("TIMEBOARD_SETTINGS", str(path))
+    monkeypatch.setenv("TIMEBOARDAPP_SETTINGS", str(path))
     get_settings.cache_clear()
 
     db_path = tmp_path / "demo_block.db"

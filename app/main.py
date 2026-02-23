@@ -39,7 +39,7 @@ settings = get_settings()
 # File + stdout logging (initially seeded from settings.yml; can be overridden
 # from the database after startup).
 setup_logging(level=settings.logging.level)
-logger = logging.getLogger("timeboard")
+logger = logging.getLogger("timeboardapp")
 
 
 app = FastAPI(title=settings.app.name, version=APP_VERSION)
@@ -470,7 +470,7 @@ def on_startup() -> None:
                 admin_password = secrets.token_urlsafe(12)
                 create_user(db, username="admin", password=admin_password, is_admin=True)
                 logger.warning("============================================================")
-                logger.warning("Timeboard initial admin account created")
+                logger.warning("TimeboardApp initial admin account created")
                 logger.warning("Username: admin")
                 logger.warning("Password: %s", admin_password)
                 logger.warning("Please log in and change this password.")

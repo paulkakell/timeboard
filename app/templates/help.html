@@ -4,7 +4,7 @@
 <h1>Help</h1>
 
 <p class="text-muted">
-  Timeboard is a lightweight task tracker with tags, recurring tasks, notifications, and a complete JSON API.
+  TimeboardApp is a lightweight task tracker with tags, recurring tasks, notifications, and a complete JSON API.
 </p>
 
 <hr>
@@ -77,7 +77,7 @@
   <li><strong>Gotify</strong>: posts to a Gotify server using an application token.</li>
   <li><strong>ntfy</strong>: posts to an ntfy topic (supports optional token and click-through link).</li>
   <li><strong>Discord</strong>: posts to a Discord channel via webhook (uses an embed so the task name is clickable when an absolute URL is available).</li>
-  <li><strong>Generic webhook</strong>: POSTs a JSON payload to a URL; optional secret is sent as <code>X-Timeboard-Secret</code>.</li>
+  <li><strong>Generic webhook</strong>: POSTs a JSON payload to a URL; optional secret is sent as <code>X-TimeboardApp-Secret</code>.</li>
   <li><strong>Generic API</strong>: calls a configurable URL/method with optional headers/token and a JSON body (for POST/PUT/PATCH).</li>
 </ul>
 
@@ -114,7 +114,7 @@
   "name": "Automation",
   "enabled": true,
   "config": {
-    "url": "https://example.com/webhook/timeboard",
+    "url": "https://example.com/webhook/timeboardapp",
     "secret": "OPTIONAL_SHARED_SECRET"
   }
 }</code></pre>
@@ -128,7 +128,7 @@
     "method": "POST",
     "token": "OPTIONAL_BEARER_TOKEN",
     "headers": {
-      "X-App": "timeboard"
+      "X-App": "timeboardapp"
     }
   }
 }</code></pre>
@@ -143,7 +143,7 @@
   The sample <code>settings.yml</code> can be used once to seed initial values, but runtime configuration is managed in the admin UI (or via the admin API).
 </p>
 <p>
-  SMTP Docker note: if Timeboard is running in a container, <code>localhost</code>/<code>127.0.0.1</code> refers to the container itself.
+  SMTP Docker note: if TimeboardApp is running in a container, <code>localhost</code>/<code>127.0.0.1</code> refers to the container itself.
   Use a hostname/IP that is reachable from inside the container (for example: an SMTP container service name on the same docker-compose network,
   or <code>host.docker.internal</code> when using Docker Desktop).
 </p>
@@ -172,7 +172,7 @@
 <h3>Endpoint reference</h3>
 
 <p class="text-muted">
-  All endpoints below are rooted at the same Timeboard base URL. Most endpoints require an API token.
+  All endpoints below are rooted at the same TimeboardApp base URL. Most endpoints require an API token.
 </p>
 
 <h4>/api/auth</h4>
@@ -293,7 +293,7 @@
     "smtp_port": 587,
     "smtp_username": "user@example.com",
     "smtp_password": "YOUR_PASSWORD",
-    "smtp_from": "Timeboard &lt;timeboard@example.com&gt;",
+    "smtp_from": "TimeboardApp &lt;timeboardapp@example.com&gt;",
     "use_tls": true
   }'</code></pre>
 
@@ -305,7 +305,7 @@
     "enabled": true,
     "provider": "sendgrid",
     "sendgrid_api_key": "YOUR_SENDGRID_API_KEY",
-    "smtp_from": "Timeboard &lt;timeboard@example.com&gt;"
+    "smtp_from": "TimeboardApp &lt;timeboardapp@example.com&gt;"
   }'</code></pre>
 
 <p>List log files:</p>
@@ -313,7 +313,7 @@
   -H "Authorization: Bearer &lt;ADMIN_TOKEN&gt;"</code></pre>
 
 <p>Read the tail of a log file:</p>
-<pre><code>curl "http://localhost:8000/api/admin/logs/files/timeboard-2026-02-20.log?max_lines=2000" \
+<pre><code>curl "http://localhost:8000/api/admin/logs/files/timeboardapp-2026-02-20.log?max_lines=2000" \
   -H "Authorization: Bearer &lt;ADMIN_TOKEN&gt;"</code></pre>
 
 {% endblock %}

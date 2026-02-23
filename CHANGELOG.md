@@ -1,9 +1,24 @@
 # Changelog
 
 
+## 00.11.00
+
+- Additive/Branding: Rebrand product name to TimeboardApp across the codebase (UI, docs, config defaults, notification headers/user-agent).
+- Additive: When demo mode is enabled (`demo.enabled: true`), the login page displays a demo warning and the demo admin username/password.
+- Fix: Docker Compose now defaults to publishing the app on `http://localhost:8888` without requiring `PORT` to be set.
+- Additive: Add a companion static website under `/web` (intended for deployment at `timeboardapp.com`) that documents features, architecture, and deployment.
+- Fix/Docs: Add `timeboardapp.com` links in the README and UI footer.
+- Fix/Legal: Change license to MIT.
+- Maintenance: Update requirements to explicitly include direct dependencies.
+
+Compatibility: Backward compatible (no DB schema changes).
+
+Refs: Issue N/A, Commit N/A
+
+
 ## 00.10.00
 
-- Additive: Demo mode in settings.yml (`demo.enabled`) to run Timeboard as a safe public demo.
+- Additive: Demo mode in settings.yml (`demo.enabled`) to run TimeboardApp as a safe public demo.
 - Additive: Robust seeded demo dataset themed as "Dunder Mifflin Paper Company, Inc".
   - Seeds users with manager/subordinate hierarchy, assigned tasks, task follows, nested subtasks, recurrence patterns, and in-app notifications.
 - Additive: Automatic demo reset job (`demo.reset_interval_minutes`) that purges + rebuilds the demo dataset on a schedule.
@@ -110,7 +125,7 @@ Compatibility: Backward compatible.
 
 - Fix: Discord webhook notifications now use an embed so the task name is a clickable link to the task entry (when an absolute URL is available via `app.base_url` or a task's `url`).
 - Additive: Profile → Notifications: clicking a generated `notify:…` routing tag now copies it to the clipboard.
-- Additive: `TIMEBOARD_BASE_URL` environment variable can override `app.base_url` (useful for generating absolute links in external notifications).
+- Additive: `TIMEBOARDAPP_BASE_URL` environment variable can override `app.base_url` (useful for generating absolute links in external notifications).
 
 Compatibility: Backward compatible.
 

@@ -30,7 +30,7 @@ from .models import (
     UserNotificationTag,
 )
 
-logger = logging.getLogger("timeboard.notifications")
+logger = logging.getLogger("timeboardapp.notifications")
 
 # ---- Task event types (stable API) -------------------------------------------------
 
@@ -506,7 +506,7 @@ def _http_request(
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("Invalid notification URL")
 
-    hdrs = {"User-Agent": "Timeboard"}
+    hdrs = {"User-Agent": "TimeboardApp"}
     if headers:
         for k, v in headers.items():
             if k and v is not None:
@@ -737,7 +737,11 @@ def _send_webhook(*, config: dict, payload: dict) -> None:
     headers: dict[str, str] = {"Content-Type": "application/json"}
     secret = str(config.get("secret") or "").strip()
     if secret:
-        headers["X-Timeboard-Secret"] = secret
+        secret_header = "X-TimeboardApp-Secret"
+        legacy_secret_header = secret_header.replace("App", "")
+        headers[secret_header] = secret
+        # Backward-compatibility: also send the legacy header name.
+        headers[legacy_secret_header] = secret
 
     data = json.dumps(payload).encode("utf-8")
     _http_request(url=url, headers=headers, data=data)
@@ -953,7 +957,7 @@ def _send_notification_via_service_impl(
         to_address = str(cfg.get("to_address") or "").strip() or str(getattr(user, "email", "") or "").strip()
         if not to_address:
             raise ValueError("No recipient email address")
-        subject = f"Timeboard: {title}"
+        subject = f"TimeboardApp: {title}"
         send_email(to_address=to_address, subject=subject, body_text=message_text, body_html=message_html, db=db)
         return
 
@@ -1058,7 +1062,7 @@ class _AsyncNotificationDispatcher:
         for i in range(n):
             t = threading.Thread(
                 target=self._worker,
-                name=f"timeboard-notify-{i}",
+                name=f"timeboardapp-notify-{i}",
                 daemon=True,
             )
             t.start()

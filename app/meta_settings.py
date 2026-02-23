@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Database-backed application settings.
 
-Timeboard historically loaded some settings from settings.yml. For settings that
+TimeboardApp historically loaded some settings from settings.yml. For settings that
 must be editable from the UI (email, logging retention, notification
 integration credentials), we store values in the `app_meta` table.
 
@@ -130,7 +130,7 @@ class EmailConfig:
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
-    smtp_from: str = "timeboard@localhost"
+    smtp_from: str = "timeboardapp@localhost"
     use_tls: bool = True
     sendgrid_api_key: str = ""
     reminder_interval_minutes: int = 60
@@ -149,7 +149,7 @@ def get_email_settings(db: Session) -> EmailConfig:
         smtp_port=_get_int(db, EMAIL_SMTP_PORT_KEY, 587, min_value=1, max_value=65535),
         smtp_username=_get_str(db, EMAIL_SMTP_USERNAME_KEY, ""),
         smtp_password=_get_str(db, EMAIL_SMTP_PASSWORD_KEY, ""),
-        smtp_from=_get_str(db, EMAIL_SMTP_FROM_KEY, "timeboard@localhost"),
+        smtp_from=_get_str(db, EMAIL_SMTP_FROM_KEY, "timeboardapp@localhost"),
         use_tls=_get_bool(db, EMAIL_USE_TLS_KEY, True),
         sendgrid_api_key=_get_str(db, EMAIL_SENDGRID_API_KEY_KEY, ""),
         reminder_interval_minutes=_get_int(
@@ -193,7 +193,7 @@ def set_email_settings(
     """
 
     host = (smtp_host or "").strip()
-    from_addr = (smtp_from or "").strip() or "timeboard@localhost"
+    from_addr = (smtp_from or "").strip() or "timeboardapp@localhost"
 
     prov = (provider or "").strip().lower() or "smtp"
     if prov not in EMAIL_PROVIDERS:
@@ -285,7 +285,7 @@ def seed_email_settings_from_legacy_yaml(db: Session, legacy_email: Any) -> None
     smtp_port = int(getattr(legacy_email, "smtp_port", 587) or 587)
     smtp_username = str(getattr(legacy_email, "smtp_username", "") or "")
     smtp_password = str(getattr(legacy_email, "smtp_password", "") or "")
-    smtp_from = str(getattr(legacy_email, "smtp_from", "timeboard@localhost") or "timeboard@localhost")
+    smtp_from = str(getattr(legacy_email, "smtp_from", "timeboardapp@localhost") or "timeboardapp@localhost")
     use_tls = bool(getattr(legacy_email, "use_tls", True))
     sendgrid_api_key = str(getattr(legacy_email, "sendgrid_api_key", "") or "")
     reminder_interval_minutes = int(getattr(legacy_email, "reminder_interval_minutes", 60) or 60)

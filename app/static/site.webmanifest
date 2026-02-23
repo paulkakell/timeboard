@@ -1,6 +1,6 @@
 {
-  "name": "Timeboard",
-  "short_name": "Timeboard",
+  "name": "TimeboardApp",
+  "short_name": "TimeboardApp",
   "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#ffffff",

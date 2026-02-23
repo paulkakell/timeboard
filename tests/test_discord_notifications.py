@@ -19,9 +19,9 @@ def settings_tmp(tmp_path, monkeypatch):
     path.write_text(
         f"""
 app:
-  name: "Timeboard"
+  name: "TimeboardApp"
   timezone: "UTC"
-  base_url: "https://timeboard.example"
+  base_url: "https://timeboardapp.example"
 security:
   session_secret: "test-session-secret"
   jwt_secret: "test-jwt-secret"
@@ -43,7 +43,7 @@ email:
   reset_token_minutes: 60
 """.lstrip()
     )
-    monkeypatch.setenv("TIMEBOARD_SETTINGS", str(path))
+    monkeypatch.setenv("TIMEBOARDAPP_SETTINGS", str(path))
     get_settings.cache_clear()
     return path
 
@@ -154,7 +154,7 @@ def test_discord_service_sends_embed_with_hyperlinked_task_name(settings_tmp, tm
 
         embed0 = embeds[0]
         assert embed0.get("title") == "Task"
-        assert str(embed0.get("url") or "").startswith("https://timeboard.example/tasks/")
+        assert str(embed0.get("url") or "").startswith("https://timeboardapp.example/tasks/")
         # The embed description carries action + task_type.
         assert "CREATED" in str(embed0.get("description") or "")
         assert "Type" in str(embed0.get("description") or "")

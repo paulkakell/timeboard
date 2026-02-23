@@ -44,7 +44,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-logger = logging.getLogger("timeboard.auth")
+logger = logging.getLogger("timeboardapp.auth")
 
 
 def ensure_admin_user(db: Session) -> None:
@@ -74,7 +74,7 @@ def ensure_admin_user(db: Session) -> None:
             db.commit()
 
             logger.warning("============================================================")
-            logger.warning("Timeboard admin recovery: existing 'admin' user promoted")
+            logger.warning("TimeboardApp admin recovery: existing 'admin' user promoted")
             logger.warning("Username: admin")
             logger.warning("Password: %s", admin_password)
             logger.warning("Please log in and change this password.")
@@ -94,7 +94,7 @@ def ensure_admin_user(db: Session) -> None:
         db.commit()
 
         logger.warning("============================================================")
-        logger.warning("Timeboard admin recovery: new admin user created")
+        logger.warning("TimeboardApp admin recovery: new admin user created")
         logger.warning("Username: admin")
         logger.warning("Password: %s", admin_password)
         logger.warning("Please log in and change this password.")

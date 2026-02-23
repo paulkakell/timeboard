@@ -67,7 +67,7 @@ def _set_meta(conn, key: str, value: str) -> None:
 def ensure_db_schema(engine: Engine) -> MigrationReport:
     """Ensure the database schema is compatible with the current app version.
 
-    Timeboard ships without Alembic migrations. For small deployments, we keep
+    TimeboardApp ships without Alembic migrations. For small deployments, we keep
     schema upgrades lightweight and SQLite-friendly by applying additive
     migrations (new tables, new nullable columns, and indexes).
 
