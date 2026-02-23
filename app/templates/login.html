@@ -4,6 +4,15 @@
   <div class="col-12 col-md-6 col-lg-4">
     <h1 class="h4 mb-3">Login</h1>
 
+    {% if demo_enabled %}
+      <div class="alert alert-warning" role="alert">
+        <div class="fw-bold">THIS IS A DEMO ENVIRONMENT AND PERIODICALLY RESET</div>
+        <div class="mt-2">
+          <div><strong>Demo admin login:</strong> <code>{{ demo_admin_username }}</code> / <code>{{ demo_admin_password }}</code></div>
+        </div>
+      </div>
+    {% endif %}
+
     {% if error %}
       <div class="alert alert-danger" role="alert">{{ error }}</div>
     {% endif %}

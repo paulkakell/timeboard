@@ -21,7 +21,7 @@ from .recurrence import (
 )
 
 
-logger = logging.getLogger("timeboard.crud")
+logger = logging.getLogger("timeboardapp.crud")
 from .utils.time_utils import from_local_to_utc_naive
 
 

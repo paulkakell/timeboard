@@ -1,10 +1,11 @@
 fastapi>=0.110
+pydantic>=2.0
 uvicorn[standard]>=0.27
 jinja2>=3.1
 python-multipart>=0.0.9
 SQLAlchemy>=2.0
 # NOTE: passlib's bcrypt handler is not compatible with newer bcrypt releases
-# (and bcrypt enforces a 72-byte password limit). Timeboard uses PBKDF2-SHA256
+# (and bcrypt enforces a 72-byte password limit). TimeboardApp uses PBKDF2-SHA256
 # to avoid that dependency and keep the image slim and reliable.
 passlib>=1.7
 python-jose[cryptography]>=3.3

@@ -11,7 +11,7 @@ from .models import Task, TaskStatus, User
 from .notifications import CHANNEL_BROWSER, create_user_notification_service
 
 
-logger = logging.getLogger("timeboard.demo_dunder")
+logger = logging.getLogger("timeboardapp.demo_dunder")
 
 
 DEMO_PASSWORD = "demo"  # nosec B105 (explicit demo-only password)
@@ -138,7 +138,7 @@ def seed_dunder_mifflin_demo(db: Session) -> dict[str, int]:
     # Use benign placeholder config values.
     disabled_specs = [
         ("gotify", {"url": "https://example.invalid", "token": "DEMO"}),
-        ("ntfy", {"topic": "timeboard-demo", "server": "https://example.invalid"}),
+        ("ntfy", {"topic": "timeboardapp-demo", "server": "https://example.invalid"}),
         ("webhook", {"url": "https://example.invalid/webhook"}),
         ("generic_api", {"url": "https://example.invalid/api", "method": "POST"}),
         ("email", {"to_address": "demo@dundermifflin.demo"}),

@@ -75,7 +75,7 @@ def build_user_export_filename(
     ts = _timestamp_utc(now)
     av = _safe_filename_token(app_version, default="UNKNOWN")
     dv = _safe_filename_token(db_version or app_version, default="UNKNOWN")
-    return f"timeboard-userexport-app{av}-db{dv}-{ts}.json"
+    return f"timeboardapp-userexport-app{av}-db{dv}-{ts}.json"
 
 
 def build_auto_backup_filename(
@@ -90,7 +90,7 @@ def build_auto_backup_filename(
     lab = _safe_filename_token((label or "").upper(), default="BACKUP")
     av = _safe_filename_token(app_version, default="UNKNOWN")
     dv = _safe_filename_token(db_version or app_version, default="UNKNOWN")
-    return f"timeboard-autobackup-{lab}-app{av}-db{dv}-{ts}.json"
+    return f"timeboardapp-autobackup-{lab}-app{av}-db{dv}-{ts}.json"
 
 
 def _parse_datetime(value: Any, *, field: str) -> datetime | None:

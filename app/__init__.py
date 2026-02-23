@@ -1,1 +1,1 @@
-# Timeboard application package
+# TimeboardApp application package

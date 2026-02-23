@@ -16,7 +16,7 @@ from .db import SessionLocal
 from .meta_settings import EmailConfig, get_email_settings
 
 
-logger = logging.getLogger("timeboard.email")
+logger = logging.getLogger("timeboardapp.email")
 
 
 SMTP_CONNECT_TIMEOUT_SECONDS = 20
@@ -132,7 +132,7 @@ def _send_via_sendgrid(
         raise ValueError("No recipient email address")
 
     from_name, from_email = parseaddr(str(cfg.smtp_from or "").strip())
-    from_email = str(from_email or "").strip() or str(cfg.smtp_from or "").strip() or "timeboard@localhost"
+    from_email = str(from_email or "").strip() or str(cfg.smtp_from or "").strip() or "timeboardapp@localhost"
     from_obj: dict = {"email": from_email}
     if str(from_name or "").strip():
         from_obj["name"] = str(from_name).strip()
@@ -153,7 +153,7 @@ def _send_via_sendgrid(
     req = request.Request(SENDGRID_SEND_ENDPOINT, data=data, method="POST")
     req.add_header("Authorization", f"Bearer {api_key}")
     req.add_header("Content-Type", "application/json")
-    req.add_header("User-Agent", "timeboard")
+    req.add_header("User-Agent", "timeboardapp")
 
     timeout = int(SENDGRID_TIMEOUT_SECONDS)
     try:
@@ -275,7 +275,7 @@ def send_email(
 
 def build_overdue_reminder_email(*, username: str, tasks: Iterable[dict], dashboard_url: str) -> tuple[str, str]:
     """Return (subject, body_text) for an overdue reminder."""
-    subject = "Timeboard overdue tasks reminder"
+    subject = "TimeboardApp overdue tasks reminder"
     lines = [f"Hello {username},", "", "The following tasks are overdue:", ""]
 
     count = 0
@@ -295,10 +295,10 @@ def build_overdue_reminder_email(*, username: str, tasks: Iterable[dict], dashbo
 
 
 def build_password_reset_email(*, username: str, reset_url: str) -> tuple[str, str]:
-    subject = "Timeboard password reset"
+    subject = "TimeboardApp password reset"
     body = (
         f"Hello {username},\n\n"
-        "A password reset was requested for your Timeboard account. "
+        "A password reset was requested for your TimeboardApp account. "
         "If you did not request this, you can ignore this email.\n\n"
         f"Reset your password using this link (expires soon):\n{reset_url}\n"
     )

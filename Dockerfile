@@ -18,7 +18,7 @@ COPY settings.sample.yml /app/settings.sample.yml
 COPY README.md /app/README.md
 
 # Default locations (override via env)
-ENV TIMEBOARD_SETTINGS=/data/settings.yml
+ENV TIMEBOARDAPP_SETTINGS=/data/settings.yml
 
 EXPOSE 8888
 

@@ -10,7 +10,7 @@ from typing import Iterable
 
 
 LOG_DIR = Path("/data/logs")
-LOG_PREFIX = "timeboard"
+LOG_PREFIX = "timeboardapp"
 
 
 def _safe_level(level: str | None, default: str = "INFO") -> int:
@@ -19,7 +19,7 @@ def _safe_level(level: str | None, default: str = "INFO") -> int:
 
 
 class DailyDateFileHandler(logging.Handler):
-    """Write logs to /data/logs/timeboard-YYYY-MM-DD.log.
+    """Write logs to /data/logs/timeboardapp-YYYY-MM-DD.log.
 
     The handler checks the date on each emit and transparently rolls over to a
     new file when the local date changes.
@@ -135,7 +135,7 @@ def apply_log_level(level: str) -> None:
     """Update log levels at runtime."""
     lvl = _safe_level(level)
     logging.getLogger().setLevel(lvl)
-    for lg in ("timeboard", "timeboard.ui", "timeboard.auth", "timeboard.email"):
+    for lg in ("timeboardapp", "timeboardapp.ui", "timeboardapp.auth", "timeboardapp.email"):
         logging.getLogger(lg).setLevel(lvl)
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
         logging.getLogger(name).setLevel(lvl)

@@ -66,7 +66,7 @@ def test_send_email_sendgrid_builds_expected_request(monkeypatch):
         enabled=True,
         provider="sendgrid",
         sendgrid_api_key="SG.TEST",
-        smtp_from="Timeboard <timeboard@example.com>",
+        smtp_from="TimeboardApp <timeboardapp@example.com>",
     )
     monkeypatch.setattr(emailer, "_load_email_config", lambda db=None: cfg)
 
@@ -97,8 +97,8 @@ def test_send_email_sendgrid_builds_expected_request(monkeypatch):
 
     payload = json.loads(req.data.decode("utf-8"))
     assert payload["subject"] == "Subject"
-    assert payload["from"]["email"] == "timeboard@example.com"
-    assert payload["from"]["name"] == "Timeboard"
+    assert payload["from"]["email"] == "timeboardapp@example.com"
+    assert payload["from"]["name"] == "TimeboardApp"
     assert len(payload["personalizations"][0]["to"]) == 2
     assert payload["personalizations"][0]["to"][0]["email"] == "u1@example.com"
     assert payload["personalizations"][0]["to"][0]["name"] == "User One"

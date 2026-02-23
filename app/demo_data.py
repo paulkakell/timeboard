@@ -9,7 +9,7 @@ from .crud import create_task
 from .models import RecurrenceType, Task, User
 
 
-logger = logging.getLogger("timeboard.demo_data")
+logger = logging.getLogger("timeboardapp.demo_data")
 
 
 def seed_demo_data(db: Session, *, owner: User) -> dict[str, int]:
@@ -34,7 +34,7 @@ def seed_demo_data(db: Session, *, owner: User) -> dict[str, int]:
 
     demo_tasks: list[dict] = [
         {
-            "name": "Welcome to Timeboard",
+            "name": "Welcome to TimeboardApp",
             "task_type": "Getting Started",
             "due_date": now + timedelta(hours=2),
             "description": (

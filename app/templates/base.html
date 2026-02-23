@@ -123,6 +123,7 @@
           {% if db_version %}<span class="ms-2">DB {{ db_version }}</span>{% endif %}
         </div>
         <div class="d-flex gap-3">
+          <a class="text-muted" href="{{ project_site_url }}" target="_blank" rel="noopener">Website</a>
           <a class="text-muted" href="{{ github_repo_url }}" target="_blank" rel="noopener">GitHub</a>
           {% if site_mode == 'mobile' %}
             <a class="text-muted" href="/site/desktop">Desktop site</a>

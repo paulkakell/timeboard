@@ -19,9 +19,9 @@ def settings_tmp(tmp_path, monkeypatch):
     path.write_text(
         f"""
 app:
-  name: "Timeboard"
+  name: "TimeboardApp"
   timezone: "UTC"
-  base_url: "https://timeboard.example"
+  base_url: "https://timeboardapp.example"
 security:
   session_secret: "test-session-secret"
   jwt_secret: "test-jwt-secret"
@@ -43,7 +43,7 @@ email:
   reset_token_minutes: 60
 """.lstrip()
     )
-    monkeypatch.setenv("TIMEBOARD_SETTINGS", str(path))
+    monkeypatch.setenv("TIMEBOARDAPP_SETTINGS", str(path))
     get_settings.cache_clear()
     return path
 

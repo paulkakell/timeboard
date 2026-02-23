@@ -1,5 +1,5 @@
 app:
-  name: "Timeboard"
+  name: "TimeboardApp"
   timezone: "America/Denver"   # Used for display and interpreting date/time inputs
   host: "0.0.0.0"
   port: 8888
@@ -10,7 +10,7 @@ security:
   jwt_secret: "CHANGE_ME_JWT_SECRET"          # Used to sign API JWT tokens
 
 database:
-  path: "/data/timeboard.db"     # SQLite database file
+  path: "/data/timeboardapp.db"     # SQLite database file
 
 purge:
   default_days: 15                # Default purge window for archived tasks (per-user override exists)
@@ -35,7 +35,7 @@ email:
   smtp_port: 587
   smtp_username: ""
   smtp_password: ""
-  smtp_from: "timeboard@localhost"
+  smtp_from: "timeboardapp@localhost"
   use_tls: true
 
   # --- SendGrid API (used when provider: sendgrid) ---------------------------

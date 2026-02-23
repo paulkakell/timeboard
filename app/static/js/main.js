@@ -237,7 +237,7 @@
             if (!payload) return;
 
             if ('Notification' in window && Notification.permission === 'granted') {
-              const n = new Notification(payload.title || 'Timeboard', {
+              const n = new Notification(payload.title || 'TimeboardApp', {
                 body: payload.message || ''
               });
               n.onclick = function () {

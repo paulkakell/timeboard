@@ -10,11 +10,23 @@ import yaml
 from pydantic import BaseModel, Field
 
 
-DEFAULT_SETTINGS_PATH = os.environ.get("TIMEBOARD_SETTINGS", "/data/settings.yml")
+ENV_PREFIX = "TIMEBOARDAPP"
+# Backward-compatibility: accept the legacy prefix (without the "APP" suffix).
+LEGACY_ENV_PREFIX = ENV_PREFIX[:-3]
+
+def _env(suffix: str) -> str | None:
+    """Return env var value for TIMEBOARDAPP_* with fallback to the legacy prefix vars."""
+
+    key = f"{ENV_PREFIX}_{suffix}"
+    legacy_key = f"{LEGACY_ENV_PREFIX}_{suffix}"
+    return os.environ.get(key) or os.environ.get(legacy_key)
+
+
+DEFAULT_SETTINGS_PATH = _env("SETTINGS") or "/data/settings.yml"
 
 
 class AppSettings(BaseModel):
-    name: str = "Timeboard"
+    name: str = "TimeboardApp"
     timezone: str = "UTC"
     host: str = "0.0.0.0"  # nosec B104
     port: int = 8888
@@ -27,7 +39,7 @@ class SecuritySettings(BaseModel):
 
 
 class DatabaseSettings(BaseModel):
-    path: str = "/data/timeboard.db"
+    path: str = "/data/timeboardapp.db"
 
 
 class PurgeSettings(BaseModel):
@@ -47,7 +59,7 @@ class EmailSettings(BaseModel):
     smtp_username: str = ""
     smtp_password: str = ""
 
-    smtp_from: str = "timeboard@localhost"
+    smtp_from: str = "timeboardapp@localhost"
 
     # If True, use STARTTLS.
     use_tls: bool = True
@@ -102,12 +114,12 @@ def _ensure_settings_file(path: str) -> None:
     else:
         # Minimal fallback
         p.write_text(
-            "app:\n  name: 'Timeboard'\n  timezone: 'UTC'\n  host: '0.0.0.0'\n  port: 8888\n"
+            "app:\n  name: 'TimeboardApp'\n  timezone: 'UTC'\n  host: '0.0.0.0'\n  port: 8888\n"
             "security:\n  session_secret: 'CHANGE_ME_SESSION_SECRET'\n  jwt_secret: 'CHANGE_ME_JWT_SECRET'\n"
-            "database:\n  path: '/data/timeboard.db'\n"
+            "database:\n  path: '/data/timeboardapp.db'\n"
             "purge:\n  default_days: 15\n  interval_minutes: 60\n"
             "demo:\n  enabled: false\n  reset_interval_minutes: 360\n  disable_external_apis: true\n"
-            "email:\n  enabled: false\n  provider: 'smtp'\n  smtp_host: ''\n  smtp_port: 587\n  smtp_username: ''\n  smtp_password: ''\n  smtp_from: 'timeboard@localhost'\n  use_tls: true\n  sendgrid_api_key: ''\n  reminder_interval_minutes: 60\n  reset_token_minutes: 60\n"
+            "email:\n  enabled: false\n  provider: 'smtp'\n  smtp_host: ''\n  smtp_port: 587\n  smtp_username: ''\n  smtp_password: ''\n  smtp_from: 'timeboardapp@localhost'\n  use_tls: true\n  sendgrid_api_key: ''\n  reminder_interval_minutes: 60\n  reset_token_minutes: 60\n"
         )
 
 
@@ -121,26 +133,26 @@ def _load_yaml(path: str) -> Dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    settings_path = os.environ.get("TIMEBOARD_SETTINGS", DEFAULT_SETTINGS_PATH)
+    settings_path = _env("SETTINGS") or DEFAULT_SETTINGS_PATH
     _ensure_settings_file(settings_path)
     raw = _load_yaml(settings_path)
     s = Settings.model_validate(raw)
 
     # Allow env overrides for secrets.
-    session_secret = os.environ.get("TIMEBOARD_SESSION_SECRET")
-    jwt_secret = os.environ.get("TIMEBOARD_JWT_SECRET")
+    session_secret = _env("SESSION_SECRET")
+    jwt_secret = _env("JWT_SECRET")
     if session_secret:
         s.security.session_secret = session_secret
     if jwt_secret:
         s.security.jwt_secret = jwt_secret
 
     # Public base URL override (useful for external notifications).
-    base_url_env = os.environ.get("TIMEBOARD_BASE_URL")
+    base_url_env = _env("BASE_URL")
     if base_url_env:
         s.app.base_url = str(base_url_env).strip()
 
     # Port override is occasionally useful in container orchestration.
-    port_env = os.environ.get("PORT") or os.environ.get("TIMEBOARD_PORT")
+    port_env = os.environ.get("PORT") or _env("PORT")
     if port_env:
         try:
             s.app.port = int(port_env)

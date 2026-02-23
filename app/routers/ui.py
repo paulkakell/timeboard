@@ -179,7 +179,8 @@ templates.env.filters["linkify"] = linkify_urls
 
 # Global template vars
 templates.env.globals["app_version"] = APP_VERSION
-templates.env.globals["github_repo_url"] = "https://github.com/paulkakell/timeboard"
+templates.env.globals["github_repo_url"] = "https://github.com/paulkakell/timeboardapp"
+templates.env.globals["project_site_url"] = "https://timeboardapp.com"
 
 # Cache-busting for static assets.
 static_dir = Path(__file__).resolve().parent.parent / "static"
@@ -192,7 +193,7 @@ except Exception:
 
 
 settings = get_settings()
-logger = logging.getLogger("timeboard.ui")
+logger = logging.getLogger("timeboardapp.ui")
 
 
 # Session key for remembering dashboard filter state.
@@ -653,6 +654,25 @@ def set_site_mobile(request: Request, next: str | None = None):
     return _redirect(next or request.headers.get("referer") or "/dashboard")
 
 
+
+
+def _demo_login_context() -> dict[str, Any]:
+    """Template context additions for demo-mode login pages."""
+
+    enabled = bool(getattr(settings, "demo", None) and bool(getattr(settings.demo, "enabled", False)))
+    if not enabled:
+        return {"demo_enabled": False}
+
+    # Demo admin credentials are intentionally well-known. This is demo-only.
+    from ..demo_dunder_mifflin import DEMO_PASSWORD
+
+    return {
+        "demo_enabled": True,
+        "demo_admin_username": "admin",
+        "demo_admin_password": str(DEMO_PASSWORD),
+    }
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_get(request: Request, db: Session = Depends(get_db)):
     user = _get_current_user(request, db)
@@ -675,6 +695,7 @@ def login_get(request: Request, db: Session = Depends(get_db)):
             db=db,
             error=None,
             success=success_msg,
+            **_demo_login_context(),
         ),
     )
 
@@ -696,6 +717,7 @@ def login_post(
                 db=db,
                 error="Invalid username/email or password",
                 success=None,
+                **_demo_login_context(),
             ),
             status_code=401,
         )

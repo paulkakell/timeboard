@@ -25,7 +25,7 @@ def _reset_admin_password(db: Session, *, username: str, new_password: str) -> N
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="timeboard")
+    parser = argparse.ArgumentParser(prog="timeboardapp")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_reset = sub.add_parser(
