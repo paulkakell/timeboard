@@ -545,6 +545,31 @@ def list_tags_for_user(db: Session, *, user: User) -> list[Tag]:
     return q.all()
 
 
+def list_past_due_tags_for_user(
+    db: Session,
+    *,
+    user: User,
+    when_utc: datetime | None = None,
+) -> list[dict[str, int | str]]:
+    """Return tags attached to this user's active tasks that are past due."""
+
+    now = (when_utc or _now_utc_naive()).replace(tzinfo=None)
+    rows = (
+        db.query(Tag.id, Tag.name, func.count(func.distinct(Task.id)))
+        .join(Tag.tasks)
+        .filter(Task.user_id == int(user.id))
+        .filter(Task.status == TaskStatus.active)
+        .filter(Task.due_date_utc < now)
+        .group_by(Tag.id, Tag.name)
+        .order_by(Tag.name.asc())
+        .all()
+    )
+    return [
+        {"id": int(tag_id), "name": str(name), "task_count": int(task_count or 0)}
+        for tag_id, name, task_count in rows
+    ]
+
+
 # ---------------------- Tasks ----------------------
 
 
@@ -1092,6 +1117,59 @@ def list_tasks(
 
     return q.all()
 
+
+
+def get_task_summary_counts(
+    db: Session,
+    *,
+    current_user: User,
+    now_utc: datetime | None = None,
+) -> dict[str, int]:
+    """Return dashboard-style task summary counts for the authenticated user.
+
+    Archived includes completed + deleted tasks. All other buckets count active
+    tasks only. Upcoming buckets are mutually exclusive and sum to
+    ``all_upcoming_due``.
+    """
+
+    now = (now_utc or datetime.utcnow()).replace(tzinfo=None)
+    in_8h = now + timedelta(hours=8)
+    in_24h = now + timedelta(hours=24)
+
+    active_base = _tasks_base_query(
+        db,
+        current_user=current_user,
+        include_archived=True,
+        search=None,
+        tag=None,
+        user_id=None,
+        task_type=None,
+        status=TaskStatus.active.value,
+    )
+
+    past_due = active_base.filter(Task.due_date_utc < now).count()
+    due_in_0_8h = active_base.filter(Task.due_date_utc >= now, Task.due_date_utc < in_8h).count()
+    due_in_8_24h = active_base.filter(Task.due_date_utc >= in_8h, Task.due_date_utc < in_24h).count()
+    due_in_over_24h = active_base.filter(Task.due_date_utc >= in_24h).count()
+    archived = _tasks_base_query(
+        db,
+        current_user=current_user,
+        include_archived=True,
+        search=None,
+        tag=None,
+        user_id=None,
+        task_type=None,
+        status="archived",
+    ).count()
+
+    return {
+        "archived": int(archived or 0),
+        "past_due": int(past_due or 0),
+        "all_upcoming_due": int((due_in_0_8h or 0) + (due_in_8_24h or 0) + (due_in_over_24h or 0)),
+        "due_in_0_8h": int(due_in_0_8h or 0),
+        "due_in_8_24h": int(due_in_8_24h or 0),
+        "due_in_over_24h": int(due_in_over_24h or 0),
+    }
 
 def update_task(
     db: Session,

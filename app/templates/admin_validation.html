@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h4 mb-3">Feature &amp; Security Validation</h1>
+
+{% if error %}
+  <div class="alert alert-danger" role="alert">{{ error }}</div>
+{% endif %}
+{% if success %}
+  <div class="alert alert-success" role="alert">{{ success }}</div>
+{% endif %}
+
+<div class="card card-body mb-3">
+  <h2 class="h6">Run validation in this environment</h2>
+  <p class="mb-2">
+    This creates isolated temporary users and tasks, checks application features, performs security-oriented runtime checks,
+    writes a redacted log, and removes the temporary validation records. It does not send external email or webhook traffic.
+  </p>
+  <form method="post" action="/admin/validation/run">
+    <input type="hidden" name="csrf_token" value="{{ validation_csrf }}">
+    <button class="btn btn-primary" type="submit">Run full validation</button>
+  </form>
+</div>
+
+<div class="card card-body mb-3">
+  <h2 class="h6">Docker CLI equivalent</h2>
+  <p class="mb-2">Use this command inside the running container when browser access is unavailable:</p>
+  <pre class="mb-0"><code>python -m app.cli validate --base-url {{ loopback_base_url }}</code></pre>
+  <div class="form-text">Logs are written under {{ validation_log_dir }} by default.</div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-4">
+    <div class="card card-body h-100">
+      <h2 class="h6">Validation logs</h2>
+      {% if validation_logs %}
+        <div class="list-group list-group-flush">
+          {% for item in validation_logs %}
+            <a class="list-group-item list-group-item-action {% if selected_log == item.name %}active{% endif %}" href="/admin/validation?log={{ item.name }}">
+              <div class="fw-semibold small">{{ item.name }}</div>
+              <div class="small text-muted">{{ item.modified }} · {{ item.size_bytes }} bytes</div>
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="text-muted mb-0">No validation logs have been written yet.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-8">
+    <div class="card card-body h-100">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h2 class="h6 mb-0">Pasteable output log</h2>
+        {% if selected_log %}
+          <a class="btn btn-sm btn-outline-secondary" href="/admin/validation/logs/{{ selected_log }}">Download</a>
+        {% endif %}
+      </div>
+      {% if validation_log %}
+        <textarea class="form-control font-monospace small" rows="28" readonly>{{ validation_log }}</textarea>
+      {% else %}
+        <p class="text-muted mb-0">Run validation or select a saved log. Copy the full text into ChatGPT with the codebase when you want issues resolved.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

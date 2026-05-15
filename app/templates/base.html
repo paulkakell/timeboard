@@ -48,6 +48,7 @@
                     <li><a class="dropdown-item" href="/admin/email">Email</a></li>
                     <li><a class="dropdown-item" href="/admin/notifications">Notifications</a></li>
                     <li><a class="dropdown-item" href="/admin/logs">Logs</a></li>
+                    <li><a class="dropdown-item" href="/admin/validation">Validation</a></li>
                     <li><a class="dropdown-item" href="/admin/database">Database</a></li>
                   </ul>
                 </li>
@@ -104,6 +105,16 @@
         </div>
       </div>
     </nav>
+
+    {% if current_user and past_due_tag_bar_enabled %}
+    <div id="tbPastDueTagBar" class="tb-past-due-tag-bar bg-body-tertiary border-bottom" data-endpoint="/ui/past-due-tags" hidden>
+      <div class="container py-2 d-flex align-items-center gap-2">
+        <span class="small fw-semibold text-danger flex-shrink-0">Past due tags</span>
+        <div id="tbPastDueTagBarButtons" class="tb-past-due-tag-buttons" aria-live="polite"></div>
+        <span id="tbPastDueTagBarStatus" class="small text-muted visually-hidden" aria-live="polite"></span>
+      </div>
+    </div>
+    {% endif %}
 
     <main class="container py-4">
       {% if current_user and current_user.is_admin and db_upgrade_steps %}

@@ -25,6 +25,12 @@
   Tags are global (per installation) but tasks are always scoped to a user account. Tags are used for filtering and for routing notifications.
 </p>
 
+<h3>Past-due tag bar</h3>
+<p>
+  Each user can enable <strong>Profile → Dashboard shortcuts → Show frozen past-due tag bar</strong>.
+  When enabled, a sticky top bar lists tags assigned to active past-due tasks and opens a dashboard tab filtered to the selected tag.
+</p>
+
 <hr>
 
 <h2>Notifications</h2>
@@ -158,6 +164,12 @@
 <p>
   Logs are written to <code>/data/logs</code> (one file per day) with standard levels: DEBUG, INFO, WARN, ERROR.
   Retention and log level are configured in <a href="/admin/logs">Admin → Logs</a>.
+</p>
+
+<h3>Validation</h3>
+<p>
+  Admins can run feature and security validation from <a href="/admin/validation">Admin → Validation</a>.
+  The run writes a redacted, pasteable log under <code>/data/validation</code> by default.
 </p>
 
 <hr>

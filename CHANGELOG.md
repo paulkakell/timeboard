@@ -1,6 +1,18 @@
 # Changelog
 
 
+## 00.12.00
+
+- Additive: Add a per-user Profile setting for a frozen past-due tag shortcut bar. When enabled, the top bar dynamically lists tags assigned to active past-due tasks and opens a new dashboard tab filtered to the selected tag.
+- Additive: Add Admin → Validation for in-app full feature validation and security-oriented runtime checks in a running Docker environment. The suite writes redacted, pasteable logs under the validation log directory and is also available through `python -m app.cli validate`.
+- Fix/Security: First-run settings generation now replaces sample session/JWT secret placeholders with random secrets instead of copying placeholder values into a new runtime settings file.
+- Additive/Tests: Add regression coverage for the past-due tag data source, per-user preference persistence, validation log redaction, and validation fixture cleanup.
+
+Compatibility: Backward compatible (no DB schema changes; the new user setting uses existing `users.ui_prefs_json`).
+
+Refs: Issue N/A, Commit N/A
+
+
 ## 00.11.00
 
 - Additive/Branding: Rebrand product name to TimeboardApp across the codebase (UI, docs, config defaults, notification headers/user-agent).
