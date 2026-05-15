@@ -1,6 +1,17 @@
 # Changelog
 
 
+## 00.12.01
+
+- Fix: Restore the TimeboardApp configuration loader module so `python -m app.run` can import `get_settings` during Docker startup.
+- Fix/Security: Preserve first-run settings generation with randomized session/JWT secrets and keep the deployment entrypoint on the supported `TIMEBOARDAPP_SETTINGS` path.
+- Tests: Add regression coverage for startup configuration import and first-run settings-file creation.
+- Dependency/Tests: Add `httpx` to development requirements because FastAPI/Starlette TestClient requires it during regression tests.
+
+Compatibility: Backward compatible (no DB schema changes).
+
+Refs: Issue deployment ImportError get_settings, Commit N/A
+
 ## 00.12.00
 
 - Additive: Add a per-user Profile setting for a frozen past-due tag shortcut bar. When enabled, the top bar dynamically lists tags assigned to active past-due tasks and opens a new dashboard tab filtered to the selected tag.
