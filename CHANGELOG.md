@@ -1,5 +1,17 @@
 # Changelog
 
+## 00.13.01
+
+- Fix/Security: Set a private runtime umask and repair existing SQLite database, WAL, SHM, and journal file permissions to owner-only (`0600`) so installation-specific credentials and secrets are not world-readable.
+- Fix/Security: Add a Docker entrypoint that works whether the container starts as root or as a non-root user; root startup now honors `PUID`/`PGID`, optionally repairs `/data` ownership, and drops privileges before launching the app.
+- Fix/Security: Apply owner-only permissions to generated and repaired `settings.yml` files.
+- Fix/Compatibility: Keep settings validation compatible with both Pydantic v2 (`model_validate`) and older Pydantic v1 (`parse_obj`) runtime images.
+- Tests: Add regression coverage for first-run private umask behavior, upgraded database permission repair, SQLite sidecar permission repair, SQLite URL parsing, generated settings-file permissions, and Admin Validation passing after permission repair.
+
+Compatibility: Backward compatible. No database schema changes. Existing installations with mode `0644` database files are repaired on startup when the service account can chmod the mounted files. Set `TIMEBOARDAPP_CHOWN_DATA=false` only when host/orchestrator ownership is managed outside the container.
+
+Refs: Issue Admin Validation warning 010 database file world-accessible, Commit N/A
+
 ## 00.13.00
 
 - Additive: Add Profile → Metrics with per-user task status, due bucket, completion-rate, overdue-time, and notification metrics.

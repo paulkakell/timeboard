@@ -53,7 +53,7 @@
           <div class="card">
             <div class="badge">Storage</div>
             <h3>SQLite + SQLAlchemy</h3>
-            <p>Single-file persistence on a volume. This keeps deployments simple while supporting common workloads.</p>
+            <p>Single-file persistence on a volume. Startup applies private permissions to the database and SQLite sidecar files because they can contain secrets.</p>
           </div>
           <div class="card">
             <div class="badge">Jobs</div>

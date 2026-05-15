@@ -94,6 +94,14 @@
               <td><code>TIMEBOARDAPP_PORT</code> / <code>PORT</code></td>
               <td>Overrides <code>app.port</code> (useful in certain orchestrators).</td>
             </tr>
+            <tr>
+              <td><code>PUID</code> / <code>PGID</code></td>
+              <td>Docker entrypoint UID/GID used when the container starts as root. The entrypoint fixes <code>/data</code> ownership when possible, then drops privileges.</td>
+            </tr>
+            <tr>
+              <td><code>TIMEBOARDAPP_CHOWN_DATA</code></td>
+              <td>Set to <code>false</code> only when host or orchestrator policy manages <code>/data</code> ownership externally.</td>
+            </tr>
           </tbody>
         </table>
 
@@ -109,7 +117,7 @@
         <h2>Database</h2>
         <p>
           The default database is SQLite. In Docker, store it on a volume (for example <code>./data</code> mounted to <code>/data</code>).
-          Backups can be done by copying the database file while the container is stopped.
+          Backups can be done by copying the database file while the container is stopped. Runtime startup sets a private umask and repairs existing database, WAL, SHM, and journal sidecar files to <code>0600</code> when the service account can chmod the mounted files.
         </p>
 
         <div class="code"><pre><code>database:

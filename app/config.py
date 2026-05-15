@@ -9,6 +9,8 @@ from typing import Any, Dict
 import yaml
 from pydantic import BaseModel, Field
 
+from .permissions import apply_private_runtime_umask, secure_settings_file_permissions
+
 
 ENV_PREFIX = "TIMEBOARDAPP"
 # Backward-compatibility: accept the legacy prefix (without the "APP" suffix).
@@ -87,6 +89,7 @@ def _repair_runtime_secrets(raw: Dict[str, Any], path: str) -> Dict[str, Any]:
             p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+            secure_settings_file_permissions(path)
         except Exception:
             # Keep the secure in-memory settings even if the file cannot be
             # rewritten. A writable /data volume will persist the rotation.
@@ -171,8 +174,10 @@ class Settings(BaseModel):
 
 
 def _ensure_settings_file(path: str) -> None:
+    apply_private_runtime_umask()
     p = Path(path)
     if p.exists():
+        secure_settings_file_permissions(path)
         return
 
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -186,6 +191,7 @@ def _ensure_settings_file(path: str) -> None:
         text = text.replace("CHANGE_ME_SESSION_SECRET", session_secret)
         text = text.replace("CHANGE_ME_JWT_SECRET", jwt_secret)
         p.write_text(text, encoding="utf-8")
+        secure_settings_file_permissions(path)
     else:
         # Minimal fallback
         p.write_text(
@@ -196,6 +202,7 @@ def _ensure_settings_file(path: str) -> None:
             "demo:\n  enabled: false\n  reset_interval_minutes: 360\n  disable_external_apis: true\n"
             "email:\n  enabled: false\n  provider: 'smtp'\n  smtp_host: ''\n  smtp_port: 587\n  smtp_username: ''\n  smtp_password: ''\n  smtp_from: 'timeboardapp@localhost'\n  use_tls: true\n  sendgrid_api_key: ''\n  reminder_interval_minutes: 60\n  reset_token_minutes: 60\n"
         )
+        secure_settings_file_permissions(path)
 
 
 def _load_yaml(path: str) -> Dict[str, Any]:
@@ -211,7 +218,10 @@ def get_settings() -> Settings:
     settings_path = _env("SETTINGS") or DEFAULT_SETTINGS_PATH
     _ensure_settings_file(settings_path)
     raw = _repair_runtime_secrets(_load_yaml(settings_path), settings_path)
-    s = Settings.model_validate(raw)
+    if hasattr(Settings, "model_validate"):
+        s = Settings.model_validate(raw)
+    else:  # Pydantic v1 compatibility for older runtime images.
+        s = Settings.parse_obj(raw)
 
     # Allow env overrides for strong secrets. Weak placeholder overrides are
     # ignored so legacy compose/env files cannot force insecure runtime signing.

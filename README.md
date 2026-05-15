@@ -2,7 +2,7 @@
 
 A lightweight, dockerized task board that supports recurrence intervals shorter than a day.
 
-Current version: **00.13.00**
+Current version: **00.13.01**
 
 Website:
 - https://timeboardapp.com
@@ -114,6 +114,8 @@ On first run, if the settings file does not exist, TimeboardApp copies `settings
 
 Secret rotation invalidates existing browser sessions and API tokens; affected users must sign in again.
 
+Runtime file permissions: the Docker entrypoint and application startup set a private umask and repair existing SQLite database permissions. New database files, SQLite sidecar files, and generated settings files are owner-readable/writable only (`0600`). On upgraded installations, startup strips world access from existing database files before Admin Validation runs. When the container starts as root, it honors `PUID`/`PGID`, fixes `/data` ownership when possible, and then drops privileges; when it starts as a non-root user, it still applies the private umask and best-effort permission repair.
+
 Common settings:
 
 - `app.timezone`: used for displaying and interpreting date/time inputs.
@@ -147,7 +149,7 @@ Docker CLI equivalent:
 docker compose exec timeboardapp python -m app.cli validate --base-url http://127.0.0.1:8888
 ```
 
-By default, validation logs are written under `/data/validation`. The runtime image includes `pip-audit` so validation can confirm CVE tooling availability; outbound network access is still required for full vulnerability lookups. Live API endpoint exercise is restricted to loopback URLs (`localhost`, `127.0.0.1`, or `::1`) to avoid server-side request forgery risk. Copy the full output log into ChatGPT with the codebase when you want issues resolved.
+By default, validation logs are written under `/data/validation`. The runtime image includes `pip-audit` so validation can confirm CVE tooling availability; outbound network access is still required for full vulnerability lookups. Live API endpoint exercise is restricted to loopback URLs (`localhost`, `127.0.0.1`, or `::1`) to avoid server-side request forgery risk. The installation-specific credentials/secrets check verifies that the SQLite database and SQLite sidecar files are not world-readable. Copy the full output log into ChatGPT with the codebase when you want issues resolved.
 
 ## API usage
 

@@ -29,6 +29,7 @@ from .meta_settings import (
 from .migrations import ensure_db_schema
 from .models import Task, TaskStatus, User
 from .notifications import EVENT_PAST_DUE, notify_task_event, shutdown_notification_dispatcher
+from .permissions import secure_sqlite_database_permissions
 from .routers import api_admin, api_auth, api_homepage, api_metrics, api_notifications, api_tags, api_tasks, api_users, ui
 from .utils.time_utils import format_dt_display, to_local
 from .version import APP_VERSION
@@ -40,6 +41,18 @@ settings = get_settings()
 # from the database after startup).
 setup_logging(level=settings.logging.level)
 logger = logging.getLogger("timeboardapp")
+
+
+def _repair_runtime_database_permissions() -> None:
+    """Repair SQLite database file exposure on startup and upgrade."""
+
+    for result in secure_sqlite_database_permissions(settings.database.path):
+        if result.error:
+            logger.warning("Database permission repair skipped for %s: %s", result.path, result.error)
+        elif result.changed and result.path.is_file():
+            before = "unknown" if result.mode_before is None else f"{result.mode_before:o}"
+            after = "unknown" if result.mode_after is None else f"{result.mode_after:o}"
+            logger.info("Restricted database-related file permissions for %s: %s -> %s", result.path, before, after)
 
 
 app = FastAPI(title=settings.app.name, version=APP_VERSION)
@@ -460,6 +473,8 @@ def _public_base_url() -> str:
 def on_startup() -> None:
     global scheduler
 
+    _repair_runtime_database_permissions()
+
     # Detect a fresh install before SQLAlchemy creates the SQLite DB file.
     is_fresh_db_file = False
     try:
@@ -472,12 +487,14 @@ def on_startup() -> None:
 
     # Ensure DB tables exist.
     Base.metadata.create_all(bind=engine)
+    _repair_runtime_database_permissions()
 
     # Lightweight schema migrations (adds new nullable columns/tables).
     report = ensure_db_schema(engine)
     app.state.db_migration_report = report
     if report.applied_steps:
         logger.warning("Database schema upgraded to %s (%s)", report.current_db_version, ", ".join(report.applied_steps))
+    _repair_runtime_database_permissions()
 
     # Seed DB-backed settings from legacy settings.yml if missing.
     db_seed = SessionLocal()

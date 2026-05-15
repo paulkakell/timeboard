@@ -82,13 +82,22 @@ export TIMEBOARDAPP_JWT_SECRET="..."</code></pre></div>
       </div>
     </section>
 
+    <section class="section">
+      <div class="container">
+        <h2>Runtime file permissions</h2>
+        <p>
+          The SQLite database stores installation-specific credentials, password hashes, reset tokens, notification configuration, and integration secrets. TimeboardApp therefore treats the database and SQLite sidecar files as secret-bearing files. Startup applies a private umask and repairs existing database, WAL, SHM, and journal files to <code>0600</code> when the service account has permission to do so. Generated or repaired <code>settings.yml</code> files are also set to <code>0600</code>.
+        </p>
+        <p class="small">In Docker, the entrypoint works for both root and non-root starts. When started as root, it honors <code>PUID</code>/<code>PGID</code>, optionally fixes <code>/data</code> ownership, and drops privileges before launching the app.</p>
+      </div>
+    </section>
 
     <section class="section">
       <div class="container">
         <h2>Runtime validation</h2>
         <p>
           Admins can run feature validation and security-oriented checks from <strong>Admin → Validation</strong> in a running environment.
-          The suite now inventories documented API endpoints, optionally exercises each documented endpoint over a loopback-only base URL, checks installation-specific credential and secret risks, scans for known orphaned release artifacts, and validates configuration paths for every allowed notification channel without sending external traffic.
+          The suite now inventories documented API endpoints, optionally exercises each documented endpoint over a loopback-only base URL, checks installation-specific credential and secret risks, verifies that SQLite database files are not world-readable, scans for known orphaned release artifacts, and validates configuration paths for every allowed notification channel without sending external traffic.
           The same suite is available from the container shell.
         </p>
         <div class="code"><pre><code>python -m app.cli validate --base-url http://127.0.0.1:8888</code></pre></div>

@@ -16,10 +16,13 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY app /app/app
 COPY settings.sample.yml /app/settings.sample.yml
 COPY README.md /app/README.md
+COPY docker-entrypoint.py /app/docker-entrypoint.py
+RUN chmod 0755 /app/docker-entrypoint.py
 
 # Default locations (override via env)
 ENV TIMEBOARDAPP_SETTINGS=/data/settings.yml
 
 EXPOSE 8888
 
+ENTRYPOINT ["python", "/app/docker-entrypoint.py"]
 CMD ["python", "-m", "app.run"]

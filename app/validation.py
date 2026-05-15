@@ -50,6 +50,7 @@ from .logging_setup import list_log_files
 from .meta_settings import get_email_settings, get_logging_settings, get_wns_settings
 from .models import AppMeta, Tag, TaskStatus, User
 from .routers import api_admin, api_auth, api_homepage, api_metrics, api_notifications, api_tags, api_tasks, api_users
+from .permissions import sqlite_database_path, sqlite_related_paths
 from .notifications import (
     CHANNEL_BROWSER,
     CHANNEL_DISCORD,
@@ -616,14 +617,15 @@ def _check_installation_specific_security(db: Session) -> tuple[str, str]:
         if _is_weak_secret_value(wns_cfg.client_secret):
             findings.append("WNS is enabled but client_secret is missing or weak")
 
-    db_path = str(getattr(settings.database, "path", "") or "")
-    if db_path and not db_path.startswith("sqlite:"):
+    db_path = sqlite_database_path(getattr(settings.database, "path", ""))
+    if db_path is not None:
         try:
-            p = Path(db_path)
-            if p.exists():
-                mode = p.stat().st_mode & 0o777
-                if mode & 0o007:
-                    warnings.append(f"database file is world-accessible (mode {mode:o})")
+            for p in sqlite_related_paths(db_path):
+                if p.exists():
+                    mode = p.stat().st_mode & 0o777
+                    if mode & 0o007:
+                        label = "database file" if p == db_path else f"database sidecar file {p.name}"
+                        warnings.append(f"{label} is world-accessible (mode {mode:o})")
         except Exception as exc:
             warnings.append(f"database file permission check unavailable: {type(exc).__name__}")
 

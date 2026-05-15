@@ -6,6 +6,7 @@ services:
       - TZ=${TZ:-UTC}
       - PGID=${PGID:-1000}
       - PUID=${PUID:-1000}
+      - TIMEBOARDAPP_CHOWN_DATA=${TIMEBOARDAPP_CHOWN_DATA:-true}
     networks:
       - net_internal
       - net_external

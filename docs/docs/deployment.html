@@ -101,6 +101,18 @@
 }</code></pre></div>
       </div>
     </section>
+    <section class="section">
+      <div class="container">
+        <h2>Container user and data permissions</h2>
+        <p>
+          The Docker entrypoint sets a private umask before the app starts. If the container starts as root, it uses <code>PUID</code>/<code>PGID</code> (default <code>1000:1000</code>), repairs <code>/data</code> ownership when possible, and then drops privileges. If the container starts as a non-root user, the same private umask and in-app database permission repair still apply.
+        </p>
+        <div class="code"><pre><code>PUID=1000
+PGID=1000
+TIMEBOARDAPP_CHOWN_DATA=true</code></pre></div>
+        <p class="small">Set <code>TIMEBOARDAPP_CHOWN_DATA=false</code> only when your host or orchestrator manages mounted-volume ownership. The SQLite database and sidecar files are repaired to <code>0600</code> on startup when chmod is permitted.</p>
+      </div>
+    </section>
 
     <section class="section">
       <div class="container">

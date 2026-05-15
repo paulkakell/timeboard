@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import get_settings
+from .permissions import apply_private_runtime_umask, secure_sqlite_database_permissions
 
 
 class Base(DeclarativeBase):
@@ -12,12 +13,14 @@ class Base(DeclarativeBase):
 
 def _sqlite_url(db_path: str) -> str:
     # Ensure absolute path for sqlite file.
-    if db_path.startswith("sqlite:"):
+    if db_path.startswith("sqlite:") or db_path.startswith("sqlite+"):
         return db_path
     return f"sqlite:///{db_path}"
 
 
+apply_private_runtime_umask()
 settings = get_settings()
+secure_sqlite_database_permissions(settings.database.path)
 engine = create_engine(
     _sqlite_url(settings.database.path),
     connect_args={"check_same_thread": False},
