@@ -111,9 +111,19 @@ curl -H "Authorization: Bearer $TOKEN" \
               <td>Notification services and user settings</td>
             </tr>
             <tr>
+              <td>Metrics</td>
+              <td><code>/api/metrics</code></td>
+              <td>User, deployment, Prometheus, and InfluxDB metrics exports</td>
+            </tr>
+            <tr>
+              <td>Homepage</td>
+              <td><code>/api/homepage</code></td>
+              <td>Compact JSON payloads for GetHomepage.dev Custom API widgets</td>
+            </tr>
+            <tr>
               <td>Admin</td>
               <td><code>/api/admin</code></td>
-              <td>Admin-only endpoints (export/import, user ops)</td>
+              <td>Admin-only endpoints for email, logging, WNS, and logs</td>
             </tr>
           </tbody>
         </table>
@@ -121,9 +131,61 @@ curl -H "Authorization: Bearer $TOKEN" \
         <p class="small">For exact request/response schemas, use <code>/docs</code> on your running instance.</p>
       </div>
     </section>
-  <h2 id="tasks-summary-endpoint">Tasks summary endpoint</h2>
-<p><code>GET /api/tasks/summary</code> returns summary totals for the authenticated user inferred from the bearer token. The payload includes <code>archived</code>, <code>past_due</code>, <code>all_upcoming_due</code>, <code>due_in_0_8h</code>, <code>due_in_8_24h</code>, and <code>due_in_over_24h</code>.</p>
-</main>
+    <section class="section">
+      <div class="container">
+        <h2 id="tasks-summary-endpoint">Tasks summary endpoint</h2>
+        <p><code>GET /api/tasks/summary</code> returns summary totals for the authenticated user inferred from the bearer token. The payload includes <code>archived</code>, <code>past_due</code>, <code>all_upcoming_due</code>, <code>due_in_0_8h</code>, <code>due_in_8_24h</code>, and <code>due_in_over_24h</code>.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Metrics endpoints</h2>
+        <p>Use these endpoints to feed external metrics collectors such as InfluxDB/Grafana or Prometheus-compatible scrapers.</p>
+        <table class="table">
+          <thead><tr><th>Method</th><th>Path</th><th>Scope</th><th>Format</th></tr></thead>
+          <tbody>
+            <tr><td>GET</td><td><code>/api/metrics/catalog</code></td><td>Authenticated user</td><td>JSON endpoint catalog</td></tr>
+            <tr><td>GET</td><td><code>/api/metrics/me</code></td><td>Authenticated user</td><td>JSON current-user metrics</td></tr>
+            <tr><td>GET</td><td><code>/api/metrics/users</code></td><td>Admin</td><td>JSON metrics for all users</td></tr>
+            <tr><td>GET</td><td><code>/api/metrics/users/{user_id}</code></td><td>Admin or same user</td><td>JSON metrics for one user</td></tr>
+            <tr><td>GET</td><td><code>/api/metrics/deployment</code></td><td>Admin</td><td>JSON deployment metrics</td></tr>
+            <tr><td>GET</td><td><code>/api/metrics/prometheus</code></td><td>Admin</td><td>Prometheus text exposition</td></tr>
+            <tr><td>GET</td><td><code>/api/metrics/influx</code></td><td>Admin</td><td>InfluxDB line protocol</td></tr>
+          </tbody>
+        </table>
+        <p class="small">Metrics include task status counts, due buckets, recent activity, completion timing, overdue time, notification service counts, notification event counts, and deployment runtime.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Homepage Custom API endpoints</h2>
+        <p>These endpoints return compact top-level JSON fields for GetHomepage.dev Custom API widgets.</p>
+        <table class="table">
+          <thead><tr><th>Method</th><th>Path</th><th>Scope</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td>GET</td><td><code>/api/homepage/summary</code></td><td>Authenticated user</td><td>Current user's active, overdue, completion, and time metrics</td></tr>
+            <tr><td>GET</td><td><code>/api/homepage/deployment</code></td><td>Admin</td><td>Deployment totals, notification failures, and uptime</td></tr>
+            <tr><td>GET</td><td><code>/api/homepage/users</code></td><td>Admin</td><td>Dynamic-list-friendly user summary rows</td></tr>
+          </tbody>
+        </table>
+        <div class="code"><pre><code>- TimeboardApp:
+    widget:
+      type: customapi
+      url: https://timeboard.example.com/api/homepage/summary
+      headers:
+        Authorization: Bearer YOUR_TOKEN
+      mappings:
+        - field: active
+          label: Active
+          format: number
+        - field: past_due
+          label: Past due
+          format: number</code></pre></div>
+      </div>
+    </section>
+  </main>
 
   <footer class="footer">
     <div class="container footer-inner">

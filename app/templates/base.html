@@ -89,7 +89,14 @@
                   <li><a class="dropdown-item text-center" href="/notifications">View all</a></li>
                 </ul>
               </li>
-              <li class="nav-item"><a class="nav-link" href="/profile">Profile</a></li>
+              <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">Profile</a>
+                <ul class="dropdown-menu dropdown-menu-end">
+                  <li><a class="dropdown-item" href="/profile">Settings</a></li>
+                  <li><a class="dropdown-item" href="/profile/metrics">Metrics</a></li>
+                  <li><a class="dropdown-item" href="/profile/notifications">Notification settings</a></li>
+                </ul>
+              </li>
               <li class="nav-item"><a class="nav-link" href="/logout">Logout</a></li>
             {% endif %}
           </ul>

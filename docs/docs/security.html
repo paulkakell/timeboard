@@ -88,10 +88,11 @@ export TIMEBOARDAPP_JWT_SECRET="..."</code></pre></div>
         <h2>Runtime validation</h2>
         <p>
           Admins can run feature validation and security-oriented checks from <strong>Admin → Validation</strong> in a running environment.
+          The suite now inventories documented API endpoints, optionally exercises each documented endpoint over a loopback-only base URL, checks installation-specific credential and secret risks, scans for known orphaned release artifacts, and validates configuration paths for every allowed notification channel without sending external traffic.
           The same suite is available from the container shell.
         </p>
         <div class="code"><pre><code>python -m app.cli validate --base-url http://127.0.0.1:8888</code></pre></div>
-        <p class="small">Validation logs are redacted and written under <code>/data/validation</code> by default.</p>
+        <p class="small">Validation logs are redacted and written under <code>/data/validation</code> by default. Live endpoint checks are restricted to <code>localhost</code>, <code>127.0.0.1</code>, and <code>::1</code>.</p>
       </div>
     </section>
 

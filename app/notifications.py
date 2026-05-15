@@ -113,9 +113,14 @@ def _json_dumps(obj: dict | None) -> str:
 
 def _truncate(s: str, n: int) -> str:
     txt = str(s or "")
-    if len(txt) <= int(n):
+    max_len = int(n)
+    if max_len <= 0:
+        return ""
+    if len(txt) <= max_len:
         return txt
-    return txt[: max(0, int(n) - 1)] + "…"
+    if max_len <= 3:
+        return txt[:max_len]
+    return txt[: max_len - 3] + "..."
 
 
 def _now_utc_naive() -> datetime:
@@ -668,17 +673,6 @@ def _is_http_url(url: str) -> bool:
         return p.scheme in {"http", "https"} and bool(p.netloc)
     except Exception:
         return False
-
-
-def _truncate(s: str, max_len: int) -> str:
-    s2 = str(s or "")
-    if max_len <= 0:
-        return ""
-    if len(s2) <= max_len:
-        return s2
-    if max_len <= 3:
-        return s2[:max_len]
-    return s2[: max_len - 3] + "..."
 
 
 def _build_discord_embeds(*, title: str, payload: dict) -> list[dict[str, Any]]:

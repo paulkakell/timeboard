@@ -66,6 +66,7 @@ from ..db_admin import (
 )
 from ..emailer import build_password_reset_email, email_enabled, send_email
 from ..logging_setup import list_log_files
+from ..metrics import build_user_metrics
 from ..meta_settings import (
     get_email_settings,
     get_logging_settings,
@@ -2089,6 +2090,25 @@ def profile_post(
             ),
             status_code=400,
         )
+
+
+@router.get("/profile/metrics", response_class=HTMLResponse)
+def profile_metrics_get(request: Request, db: Session = Depends(get_db)):
+    user = _get_current_user(request, db)
+    if not user:
+        return _redirect("/login")
+
+    metrics = build_user_metrics(db, user=user)
+    return templates.TemplateResponse(
+        request,
+        "profile_metrics.html",
+        _template_context(
+            request,
+            user,
+            db=db,
+            metrics=metrics,
+        ),
+    )
 
 
 @router.get("/profile/notifications", response_class=HTMLResponse)

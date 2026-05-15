@@ -2,7 +2,7 @@
 
 A lightweight, dockerized task board that supports recurrence intervals shorter than a day.
 
-Current version: **00.12.03**
+Current version: **00.13.00**
 
 Website:
 - https://timeboardapp.com
@@ -22,6 +22,7 @@ Repository:
 - Task Type filtering and sorting.
 - Calendar view with color-coded due-state filtering (per-user, persisted).
 - Optional per-user frozen past-due tag shortcut bar from **Profile**.
+- Profile metrics dashboard for per-user task completion, due-time, overdue-time, and notification metrics.
 - Archived view for completed/deleted tasks (restore archived tasks back to active).
 - Admin user management:
   - create/delete users
@@ -46,6 +47,8 @@ Repository:
 - Application logging to `/data/logs` (daily files) with configurable log level + retention via the admin UI.
 - SQLite database.
 - Full OpenAPI-documented API (Swagger UI at `/docs`).
+- Metrics APIs for user-level and deployment-level reporting, including JSON, Prometheus text, and InfluxDB line protocol exports.
+- Homepage integration endpoints for GetHomepage.dev Custom API widgets.
 - Configurable via `settings.yml` on a Docker volume.
 - Archived task purge job (default 15 days, per-user override).
 - Application + database versioning (stored in `app_meta`). On startup, older/unversioned databases are automatically upgraded to the current schema.
@@ -136,7 +139,7 @@ Each user can enable **Profile → Dashboard shortcuts → Show frozen past-due 
 
 ## Validation and security testing
 
-Admins can open **Admin → Validation** and run the full validation suite against the running environment. The suite creates isolated temporary users/tasks/services, checks major feature paths, performs security-oriented checks, writes a redacted log, and removes the temporary records. It does not send external email or webhook traffic.
+Admins can open **Admin → Validation** and run the full validation suite against the running environment. The suite creates isolated temporary users/tasks/services, checks major feature paths, verifies every documented API endpoint when a loopback `--base-url` is supplied, performs installation-specific credential/secret checks, scans for known orphaned release artifacts, validates all allowed notification channel configurations, writes a redacted log, and removes the temporary records. It does not send external email or webhook traffic.
 
 Docker CLI equivalent:
 
@@ -144,7 +147,7 @@ Docker CLI equivalent:
 docker compose exec timeboardapp python -m app.cli validate --base-url http://127.0.0.1:8888
 ```
 
-By default, validation logs are written under `/data/validation`. The runtime image includes `pip-audit` so validation can confirm CVE tooling availability; outbound network access is still required for full vulnerability lookups. Copy the full output log into ChatGPT with the codebase when you want issues resolved.
+By default, validation logs are written under `/data/validation`. The runtime image includes `pip-audit` so validation can confirm CVE tooling availability; outbound network access is still required for full vulnerability lookups. Live API endpoint exercise is restricted to loopback URLs (`localhost`, `127.0.0.1`, or `::1`) to avoid server-side request forgery risk. Copy the full output log into ChatGPT with the codebase when you want issues resolved.
 
 ## API usage
 
@@ -217,6 +220,75 @@ List notification events:
 ```bash
 curl http://localhost:8888/api/notifications/events?limit=50 \
   -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Metrics API and exports
+
+Authenticated users can retrieve their own metrics:
+
+```bash
+curl http://localhost:8888/api/metrics/me \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Admins can retrieve deployment-level and all-user metrics, plus scraper-friendly exports:
+
+```bash
+curl http://localhost:8888/api/metrics/deployment \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+
+curl http://localhost:8888/api/metrics/prometheus \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+
+curl http://localhost:8888/api/metrics/influx \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+Metrics endpoints:
+
+| Method | Path | Scope | Format |
+| --- | --- | --- | --- |
+| GET | `/api/metrics/catalog` | Authenticated user | JSON endpoint catalog |
+| GET | `/api/metrics/me` | Authenticated user | JSON current-user metrics |
+| GET | `/api/metrics/users` | Admin | JSON metrics for all users |
+| GET | `/api/metrics/users/{user_id}` | Admin or same user | JSON metrics for one user |
+| GET | `/api/metrics/deployment` | Admin | JSON deployment metrics |
+| GET | `/api/metrics/prometheus` | Admin | Prometheus text exposition |
+| GET | `/api/metrics/influx` | Admin | InfluxDB line protocol |
+
+The metrics payloads include task status counts, due buckets, 7-day/30-day creation/completion/deletion counts, on-time/late completion statistics, overdue-time totals, notification service counts, notification event counts, and runtime uptime where applicable.
+
+### Homepage Custom API integration
+
+TimeboardApp exposes compact JSON endpoints intended for GetHomepage.dev Custom API widgets:
+
+| Method | Path | Scope | Purpose |
+| --- | --- | --- | --- |
+| GET | `/api/homepage/summary` | Authenticated user | Current-user widget fields such as `active`, `past_due`, `completed_7d`, and `overdue_hours` |
+| GET | `/api/homepage/deployment` | Admin | Deployment widget fields such as users, admins, active tasks, overdue tasks, notification failures, and uptime |
+| GET | `/api/homepage/users` | Admin | Dynamic-list-friendly user rows |
+
+Example Homepage service block:
+
+```yaml
+- TimeboardApp:
+    icon: mdi-clipboard-check
+    href: https://timeboard.example.com
+    widget:
+      type: customapi
+      url: https://timeboard.example.com/api/homepage/summary
+      headers:
+        Authorization: Bearer YOUR_TOKEN
+      mappings:
+        - field: active
+          label: Active
+          format: number
+        - field: past_due
+          label: Past due
+          format: number
+        - field: completion_rate_30d
+          label: On time
+          format: percent
 ```
 
 Admin: update email settings (admin only):

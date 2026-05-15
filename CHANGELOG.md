@@ -1,5 +1,19 @@
 # Changelog
 
+## 00.13.00
+
+- Additive: Add Profile → Metrics with per-user task status, due bucket, completion-rate, overdue-time, and notification metrics.
+- Additive: Add metrics API endpoints for current-user, per-user, all-user, deployment, Prometheus text exposition, InfluxDB line protocol, and endpoint catalog reporting.
+- Additive: Add GetHomepage.dev Custom API integration endpoints for user summary, deployment summary, and dynamic-list user rows.
+- Additive/Security: Expand Admin → Validation to inventory every documented API endpoint, optionally exercise every documented endpoint over loopback HTTP, scan for orphaned release artifacts, check installation-specific weak credentials/secrets, and validate configuration for every allowed notification channel.
+- Fix: Reorder `/api/users/me` before `/api/users/{user_id}` so FastAPI resolves the static current-user endpoint correctly.
+- Fix/Maintenance: Remove obsolete duplicate static icon artifacts from earlier releases and collapse duplicate notification helper code.
+- Tests: Add regression coverage for metrics APIs, Homepage payloads, endpoint inventory, all-channel notification validation, and orphan artifact scanning.
+
+Compatibility: Backward compatible. No database schema changes. New API endpoints are additive. Existing API paths are unchanged except for the `/api/users/me` path-order bug fix.
+
+Refs: Issue Admin validation robustness / metrics / Homepage integration, Commit N/A
+
 ## 00.12.03
 
 - Fix/Security: Auto-repair legacy placeholder or short session/JWT secrets in existing `settings.yml` files and ignore weak secret environment overrides so Admin -> Validation no longer fails runtime secret strength on upgraded deployments.

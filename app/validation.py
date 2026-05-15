@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import ast
 import importlib.metadata
+import json
+import os
 import re
 import secrets
 import shutil
@@ -16,7 +19,7 @@ from typing import Callable, Iterable
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from .auth import authenticate_user
+from .auth import authenticate_user, verify_password
 from .config import get_settings
 from .crud import (
     OpenSubtasksError,
@@ -46,6 +49,7 @@ from .emailer import build_password_reset_email, email_enabled
 from .logging_setup import list_log_files
 from .meta_settings import get_email_settings, get_logging_settings, get_wns_settings
 from .models import AppMeta, Tag, TaskStatus, User
+from .routers import api_admin, api_auth, api_homepage, api_metrics, api_notifications, api_tags, api_tasks, api_users
 from .notifications import (
     CHANNEL_BROWSER,
     CHANNEL_DISCORD,
@@ -420,6 +424,216 @@ def _check_security_headers_source() -> tuple[str, str]:
     return "PASS", "Security header middleware markers found in application code."
 
 
+API_ROUTER_SPECS = [
+    ("/api/auth", api_auth.router),
+    ("/api/users", api_users.router),
+    ("/api/tasks", api_tasks.router),
+    ("/api/tags", api_tags.router),
+    ("/api/notifications", api_notifications.router),
+    ("/api/metrics", api_metrics.router),
+    ("/api/homepage", api_homepage.router),
+    ("/api/admin", api_admin.router),
+]
+
+
+def _join_api_path(prefix: str, path: str) -> str:
+    joined = (prefix.rstrip("/") + "/" + str(path or "").lstrip("/")).replace("//", "/")
+    if path == "/" and not joined.endswith("/"):
+        joined += "/"
+    return joined
+
+
+def documented_api_routes() -> list[dict[str, str]]:
+    """Return method/path combinations for every documented API router."""
+
+    rows: list[dict[str, str]] = []
+    for prefix, router in API_ROUTER_SPECS:
+        for route in getattr(router, "routes", []) or []:
+            path = getattr(route, "path", None)
+            methods = sorted([m for m in (getattr(route, "methods", set()) or set()) if m not in {"HEAD", "OPTIONS"}])
+            if not path or not methods:
+                continue
+            for method in methods:
+                rows.append(
+                    {
+                        "method": str(method).upper(),
+                        "path": _join_api_path(prefix, str(path)),
+                        "name": str(getattr(route, "name", "")),
+                    }
+                )
+    return sorted(rows, key=lambda x: (x["path"], x["method"]))
+
+
+def _check_api_endpoint_inventory() -> tuple[str, str]:
+    routes = documented_api_routes()
+    if not routes:
+        return "FAIL", "No API routes were discovered from router modules."
+
+    duplicates: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for row in routes:
+        key = (row["method"], row["path"])
+        if key in seen:
+            duplicates.append(f"{row['method']} {row['path']}")
+        seen.add(key)
+    if duplicates:
+        return "FAIL", "Duplicate documented API routes: " + _safe_detail_join(duplicates, max_items=12)
+
+    # Compare against the running FastAPI OpenAPI schema when available. Importing
+    # here avoids a module-level dependency cycle during app startup.
+    try:
+        from .main import app  # noqa: PLC0415
+
+        schema = app.openapi()
+        openapi_pairs: set[tuple[str, str]] = set()
+        for path, methods in (schema.get("paths") or {}).items():
+            if not str(path).startswith("/api/"):
+                continue
+            for method in (methods or {}).keys():
+                if str(method).lower() in {"get", "post", "put", "patch", "delete"}:
+                    openapi_pairs.add((str(method).upper(), str(path)))
+        missing = sorted([f"{m} {p}" for (m, p) in seen if (m, p) not in openapi_pairs])
+        if missing:
+            return "FAIL", "Router endpoint(s) missing from OpenAPI: " + _safe_detail_join(missing, max_items=16)
+        return "PASS", f"Endpoint matrix covers {len(routes)} documented API method/path combinations and matches OpenAPI."
+    except Exception as exc:
+        return "WARN", f"Endpoint matrix covers {len(routes)} documented API method/path combinations; OpenAPI comparison unavailable: {type(exc).__name__}: {exc}"
+
+
+def _check_orphaned_release_artifacts() -> tuple[str, str]:
+    root = Path(__file__).resolve().parent.parent
+    obsolete_paths = [
+        "app/static/apple-touch-icon.png",
+        "app/static/favicon-128.png",
+        "app/static/favicon-16.png",
+        "app/static/favicon-256.png",
+        "app/static/favicon-32.png",
+        "app/static/favicon-48.png",
+        "app/static/favicon-64.png",
+        "app/static/pwa-192.png",
+        "app/static/pwa-512.png",
+    ]
+    present = [p for p in obsolete_paths if (root / p).exists()]
+
+    duplicate_defs: list[str] = []
+    for py_path in (root / "app").rglob("*.py"):
+        if any(part in {"__pycache__", ".pytest_cache"} for part in py_path.parts):
+            continue
+        try:
+            tree = ast.parse(py_path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+        names: dict[str, int] = {}
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                names[node.name] = names.get(node.name, 0) + 1
+        for name, count in names.items():
+            if count > 1:
+                duplicate_defs.append(f"{py_path.relative_to(root)}:{name}x{count}")
+
+    findings = []
+    if present:
+        findings.append("obsolete duplicate static assets still present: " + _safe_detail_join(present, max_items=12))
+    if duplicate_defs:
+        findings.append("duplicate top-level function definitions: " + _safe_detail_join(duplicate_defs, max_items=12))
+    if findings:
+        return "WARN", " | ".join(findings)
+    return "PASS", "No known obsolete duplicate static assets or duplicate top-level function definitions found."
+
+
+def _is_weak_secret_value(value: str | None) -> bool:
+    v = str(value or "").strip()
+    if not v:
+        return True
+    if len(v) < 32:
+        return True
+    if v.lower() in {"secret", "password", "changeme", "change_me", "test", "token", "admin"}:
+        return True
+    if v.upper().startswith("CHANGE_ME"):
+        return True
+    return False
+
+
+def _check_installation_specific_security(db: Session) -> tuple[str, str]:
+    settings = get_settings()
+    findings: list[str] = []
+    warnings: list[str] = []
+
+    users = db.query(User).order_by(User.id.asc()).all()
+    admins = [u for u in users if bool(u.is_admin)]
+    if not admins:
+        findings.append("no admin account exists")
+
+    weak_candidates = [
+        "admin",
+        "password",
+        "password123",
+        "changeme",
+        "timeboardapp",
+        "TimeboardApp",
+        "letmein",
+        "welcome",
+    ]
+    for user in users:
+        candidates = list(weak_candidates)
+        uname = str(user.username or "")
+        if uname:
+            candidates.extend([uname, f"{uname}123", f"{uname}!"])
+        for candidate in candidates:
+            try:
+                if verify_password(candidate, user.hashed_password):
+                    findings.append(f"weak password detected for user '{uname}'")
+                    break
+            except Exception:
+                continue
+        if not bool(user.is_admin) and not str(user.email or "").strip():
+            warnings.append(f"non-admin user '{uname}' has no email address; password reset and email notifications are unavailable")
+
+    for env_name in [
+        "TIMEBOARDAPP_SESSION_SECRET",
+        "TIMEBOARDAPP_JWT_SECRET",
+        "TIMEBOARD_SESSION_SECRET",
+        "TIMEBOARD_JWT_SECRET",
+    ]:
+        if env_name in os.environ and _is_weak_secret_value(os.environ.get(env_name)):
+            warnings.append(f"weak {env_name} override is present; runtime ignores weak overrides, but deployment secrets should be repaired")
+
+    email_cfg = get_email_settings(db)
+    if bool(email_cfg.enabled):
+        if str(email_cfg.provider or "smtp") == "sendgrid":
+            if _is_weak_secret_value(email_cfg.sendgrid_api_key):
+                findings.append("SendGrid provider is enabled but sendgrid_api_key is missing or weak")
+        else:
+            if not str(email_cfg.smtp_host or "").strip():
+                findings.append("SMTP email is enabled but smtp_host is blank")
+            if email_cfg.smtp_password and _is_weak_secret_value(email_cfg.smtp_password):
+                findings.append("SMTP password appears to be weak or placeholder")
+
+    wns_cfg = get_wns_settings(db)
+    if bool(wns_cfg.enabled):
+        if not str(wns_cfg.package_sid or "").strip():
+            findings.append("WNS is enabled but package_sid is blank")
+        if _is_weak_secret_value(wns_cfg.client_secret):
+            findings.append("WNS is enabled but client_secret is missing or weak")
+
+    db_path = str(getattr(settings.database, "path", "") or "")
+    if db_path and not db_path.startswith("sqlite:"):
+        try:
+            p = Path(db_path)
+            if p.exists():
+                mode = p.stat().st_mode & 0o777
+                if mode & 0o007:
+                    warnings.append(f"database file is world-accessible (mode {mode:o})")
+        except Exception as exc:
+            warnings.append(f"database file permission check unavailable: {type(exc).__name__}")
+
+    if findings:
+        return "FAIL", _safe_detail_join(findings, max_items=12) + ("; warnings: " + _safe_detail_join(warnings, max_items=6) if warnings else "")
+    if warnings:
+        return "WARN", _safe_detail_join(warnings, max_items=8)
+    return "PASS", f"Checked {len(users)} user account(s), {len(admins)} admin account(s), runtime integration secrets, and database file exposure signals."
+
+
 class _ValidationFixture:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -429,7 +643,7 @@ class _ValidationFixture:
         self.manager: User | None = None
         self.subordinate: User | None = None
         self.created_user_ids: list[int] = []
-        self.created_notify_service_id: int | None = None
+        self.created_notify_service_ids: list[int] = []
         self.tag_primary = f"{self.prefix}_past"
         self.tag_secondary = f"{self.prefix}_also"
 
@@ -463,7 +677,7 @@ class _ValidationFixture:
 
     def cleanup(self) -> None:
         try:
-            for service_id in [self.created_notify_service_id]:
+            for service_id in list(self.created_notify_service_ids):
                 if service_id and self.admin:
                     try:
                         delete_user_notification_service(self.db, user_id=int(self.admin.id), service_id=int(service_id))
@@ -660,26 +874,51 @@ class _ValidationFixture:
 
     def check_notification_services_and_in_app(self) -> str:
         admin, _manager, _subordinate = self.require_ready()
-        svc = create_user_notification_service(
-            self.db,
-            user_id=int(admin.id),
-            service_type=CHANNEL_BROWSER,
-            name=f"{self.prefix} browser",
-            enabled=True,
-        )
-        self.created_notify_service_id = int(svc.id)
-        _assert(svc.tag is not None and str(svc.tag.name).startswith("notify:"), "browser service did not generate routing tag")
-        updated = update_user_notification_service(
-            self.db,
-            user_id=int(admin.id),
-            service_id=int(svc.id),
-            name=f"{self.prefix} browser updated",
-            enabled=False,
-            config={},
-        )
-        _assert(updated is not None and updated.enabled is False, "notification service update failed")
+
+        # Create one disabled service for every allowed notification channel so
+        # validation covers configuration/tag generation without sending external
+        # traffic. Browser is the only non-external channel and is also kept
+        # disabled after update to avoid side effects during the run.
+        sample_configs = {
+            CHANNEL_BROWSER: {},
+            CHANNEL_EMAIL: {"to_address": str(admin.email or f"{self.prefix}@example.invalid")},
+            CHANNEL_GOTIFY: {"base_url": "https://example.invalid", "token": "validation-token"},
+            CHANNEL_NTFY: {"server_url": "https://ntfy.sh", "topic": f"{self.prefix}-topic"},
+            CHANNEL_DISCORD: {"webhook_url": "https://example.invalid/discord/webhook"},
+            CHANNEL_WEBHOOK: {"url": "https://example.invalid/webhook", "secret": "validation-secret"},
+            CHANNEL_GENERIC_API: {"url": "https://example.invalid/api", "method": "POST", "headers": {"X-Validation": "true"}},
+            CHANNEL_WNS: {"channel_uri": "https://example.invalid/wns/channel"},
+        }
+
+        created_types: set[str] = set()
+        for service_type in CHANNEL_TYPES:
+            svc = create_user_notification_service(
+                self.db,
+                user_id=int(admin.id),
+                service_type=service_type,
+                name=f"{self.prefix} {service_type}",
+                enabled=False,
+                config=sample_configs.get(service_type, {}),
+            )
+            self.created_notify_service_ids.append(int(svc.id))
+            created_types.add(str(svc.service_type))
+            _assert(svc.tag is not None and str(svc.tag.name).startswith("notify:"), f"{service_type} service did not generate routing tag")
+
+            updated = update_user_notification_service(
+                self.db,
+                user_id=int(admin.id),
+                service_id=int(svc.id),
+                name=f"{self.prefix} {service_type} updated",
+                enabled=False,
+                config=sample_configs.get(service_type, {}),
+            )
+            _assert(updated is not None and updated.enabled is False, f"{service_type} notification service update failed")
+
         services = list_user_notification_services(self.db, user_id=int(admin.id))
-        _assert(any(int(s.id) == int(svc.id) for s in services), "notification service list did not include created service")
+        listed_ids = {int(s.id) for s in services}
+        for service_id in self.created_notify_service_ids:
+            _assert(service_id in listed_ids, f"notification service list did not include service_id={service_id}")
+        _assert(created_types == set(CHANNEL_TYPES), "not all notification channel types were configured: " + _safe_detail_join(sorted(set(CHANNEL_TYPES) - created_types)))
 
         create_in_app_notification(
             self.db,
@@ -695,7 +934,7 @@ class _ValidationFixture:
         _assert(events, "in-app notification list was empty")
         clear_in_app_unread(self.db, user_id=int(admin.id))
         _assert(count_in_app_unread(self.db, user_id=int(admin.id)) == 0, "clear unread did not clear badge count")
-        return "Notification service CRUD and in-app notification lifecycle passed."
+        return "Notification service CRUD covered all allowed channels (" + ", ".join(sorted(created_types)) + ") and in-app notification lifecycle passed."
 
     def check_admin_settings_export_and_integrations(self) -> str:
         email_cfg = get_email_settings(self.db)
@@ -718,6 +957,211 @@ class _ValidationFixture:
             "Admin settings, notification channel registry, email template, and database export validation passed"
             + (f" with warnings: {_safe_detail_join(warnings, max_items=4)}" if warnings else ".")
         )
+
+
+def _http_api_call(
+    base_url: str,
+    method: str,
+    path: str,
+    *,
+    token: str | None = None,
+    json_body: dict | None = None,
+    form_body: dict | None = None,
+    timeout_seconds: float = 4.0,
+) -> tuple[int, str, object | None]:
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValidationSkip("Base URL must use http or https")
+    host = (parsed.hostname or "").lower()
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValidationSkip("Live API endpoint checks are restricted to loopback base URLs to avoid SSRF risk")
+
+    url = urllib.parse.urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+    headers = {"User-Agent": f"TimeboardAppValidation/{APP_VERSION}"}
+    data: bytes | None = None
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if json_body is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(json_body).encode("utf-8")
+    elif form_body is not None:
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        data = urllib.parse.urlencode(form_body).encode("utf-8")
+
+    req = urllib.request.Request(url, headers=headers, data=data, method=str(method).upper())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:  # nosec B310 - loopback only, validated above
+            raw = resp.read() or b""
+            status_code = int(getattr(resp, "status", 200))
+    except urllib.error.HTTPError as exc:
+        raw = exc.read() or b""
+        status_code = int(exc.code)
+    except urllib.error.URLError as exc:
+        raise ValidationWarn(f"Could not reach {url}: {exc}") from exc
+
+    text = raw.decode("utf-8", errors="replace")
+    parsed_body: object | None = None
+    if text.strip():
+        try:
+            parsed_body = json.loads(text)
+        except Exception:
+            parsed_body = None
+    return status_code, text, parsed_body
+
+
+def _extract_access_token(body: object | None) -> str:
+    if isinstance(body, dict):
+        token = str(body.get("access_token") or "").strip()
+        if token:
+            return token
+    raise AssertionError("Token endpoint did not return access_token")
+
+
+def _check_live_documented_api_endpoints(base_url: str | None, fixture: _ValidationFixture) -> tuple[str, str]:
+    if not base_url:
+        raise ValidationSkip("No loopback base URL supplied")
+    admin, _manager, _subordinate = fixture.require_ready()
+
+    exercised: set[tuple[str, str]] = set()
+    observations: list[str] = []
+    failures: list[str] = []
+
+    def call(
+        route_key: tuple[str, str],
+        method: str,
+        path: str,
+        *,
+        token: str | None = None,
+        json_body: dict | None = None,
+        form_body: dict | None = None,
+        expected: set[int] | None = None,
+    ) -> tuple[int, str, object | None]:
+        expected_set = expected or set(range(200, 300))
+        status_code, text, body = _http_api_call(
+            base_url,
+            method,
+            path,
+            token=token,
+            json_body=json_body,
+            form_body=form_body,
+        )
+        exercised.add((route_key[0].upper(), route_key[1]))
+        observations.append(f"{method.upper()} {route_key[1]}={status_code}")
+        if status_code not in expected_set:
+            snippet = text.strip().replace("\n", " ")[:160]
+            failures.append(f"{method.upper()} {route_key[1]} got {status_code}, expected {sorted(expected_set)}; {snippet}")
+        return status_code, text, body
+
+    # Auth endpoints.
+    _status, _text, token_body = call(
+        ("POST", "/api/auth/token"),
+        "POST",
+        "/api/auth/token",
+        form_body={"username": admin.username, "password": fixture.password},
+    )
+    token = _extract_access_token(token_body)
+    call(("GET", "/api/auth/me"), "GET", "/api/auth/me", token=token)
+
+    # Current-user endpoints and admin user CRUD.
+    call(("GET", "/api/users/"), "GET", "/api/users/", token=token)
+    call(("GET", "/api/users/me"), "GET", "/api/users/me", token=token)
+    call(("PATCH", "/api/users/me"), "PATCH", "/api/users/me", token=token, json_body={})
+    api_user_payload = {
+        "username": f"{fixture.prefix}_api_user",
+        "password": fixture.password,
+        "email": f"{fixture.prefix}_api_user@example.invalid",
+        "is_admin": False,
+    }
+    _s, _t, user_body = call(("POST", "/api/users/"), "POST", "/api/users/", token=token, json_body=api_user_payload, expected={200, 201})
+    api_user_id = int(user_body.get("id")) if isinstance(user_body, dict) and user_body.get("id") else int(admin.id)
+    call(("PATCH", "/api/users/{user_id}"), "PATCH", f"/api/users/{api_user_id}", token=token, json_body={"email": f"{fixture.prefix}_api_user2@example.invalid", "is_admin": False})
+    call(("DELETE", "/api/users/{user_id}"), "DELETE", f"/api/users/{api_user_id}", token=token)
+
+    # Task CRUD and lifecycle endpoints.
+    call(("GET", "/api/tasks/"), "GET", "/api/tasks/", token=token)
+    call(("GET", "/api/tasks/summary"), "GET", "/api/tasks/summary", token=token)
+    task_payload = {
+        "name": f"{fixture.prefix} api task",
+        "task_type": "ValidationAPI",
+        "description": "created by live API endpoint validation",
+        "url": "",
+        "due_date": (datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(hours=2)).isoformat(),
+        "recurrence_type": "none",
+        "tags": [fixture.tag_primary],
+    }
+    _s, _t, task_body = call(("POST", "/api/tasks/"), "POST", "/api/tasks/", token=token, json_body=task_payload, expected={200, 201})
+    task_id = int(task_body.get("id")) if isinstance(task_body, dict) and task_body.get("id") else 0
+    _assert(task_id > 0, "Task API create did not return an id")
+    call(("GET", "/api/tasks/{task_id}"), "GET", f"/api/tasks/{task_id}", token=token)
+    call(("PUT", "/api/tasks/{task_id}"), "PUT", f"/api/tasks/{task_id}", token=token, json_body={"name": f"{fixture.prefix} api task updated"})
+    call(("POST", "/api/tasks/{task_id}/complete"), "POST", f"/api/tasks/{task_id}/complete", token=token)
+    call(("POST", "/api/tasks/{task_id}/restore"), "POST", f"/api/tasks/{task_id}/restore", token=token)
+    call(("DELETE", "/api/tasks/{task_id}"), "DELETE", f"/api/tasks/{task_id}", token=token)
+
+    # Tags.
+    call(("GET", "/api/tags/"), "GET", "/api/tags/", token=token)
+
+    # Notification services and events.
+    call(("GET", "/api/notifications/services"), "GET", "/api/notifications/services", token=token)
+    svc_payload = {"service_type": CHANNEL_BROWSER, "name": f"{fixture.prefix} api browser", "enabled": False, "config": {}}
+    _s, _t, svc_body = call(("POST", "/api/notifications/services"), "POST", "/api/notifications/services", token=token, json_body=svc_payload, expected={200, 201})
+    service_id = int(svc_body.get("id")) if isinstance(svc_body, dict) and svc_body.get("id") else 0
+    _assert(service_id > 0, "Notification service API create did not return an id")
+    fixture.created_notify_service_ids.append(service_id)
+    call(("GET", "/api/notifications/services/{service_id}"), "GET", f"/api/notifications/services/{service_id}", token=token)
+    call(("PUT", "/api/notifications/services/{service_id}"), "PUT", f"/api/notifications/services/{service_id}", token=token, json_body={"name": f"{fixture.prefix} api browser updated", "enabled": False, "config": {}})
+    call(("GET", "/api/notifications/events"), "GET", "/api/notifications/events?limit=10", token=token)
+    call(("DELETE", "/api/notifications/services/{service_id}"), "DELETE", f"/api/notifications/services/{service_id}", token=token, expected={200, 202, 204})
+    try:
+        fixture.created_notify_service_ids.remove(service_id)
+    except ValueError:
+        pass
+
+    # Metrics endpoints.
+    call(("GET", "/api/metrics/catalog"), "GET", "/api/metrics/catalog", token=token)
+    call(("GET", "/api/metrics/me"), "GET", "/api/metrics/me", token=token)
+    call(("GET", "/api/metrics/users"), "GET", "/api/metrics/users", token=token)
+    call(("GET", "/api/metrics/users/{user_id}"), "GET", f"/api/metrics/users/{int(admin.id)}", token=token)
+    call(("GET", "/api/metrics/deployment"), "GET", "/api/metrics/deployment", token=token)
+    call(("GET", "/api/metrics/prometheus"), "GET", "/api/metrics/prometheus", token=token)
+    call(("GET", "/api/metrics/influx"), "GET", "/api/metrics/influx", token=token)
+
+    # Homepage customapi endpoints.
+    call(("GET", "/api/homepage/summary"), "GET", "/api/homepage/summary", token=token)
+    call(("GET", "/api/homepage/deployment"), "GET", "/api/homepage/deployment", token=token)
+    call(("GET", "/api/homepage/users"), "GET", "/api/homepage/users", token=token)
+
+    # Admin settings/log endpoints. PUT calls preserve existing secrets.
+    _s, _t, email_body = call(("GET", "/api/admin/email"), "GET", "/api/admin/email", token=token)
+    email_payload = dict(email_body) if isinstance(email_body, dict) else {}
+    email_payload.update({"keep_existing_password": True, "keep_existing_sendgrid_api_key": True})
+    call(("PUT", "/api/admin/email"), "PUT", "/api/admin/email", token=token, json_body=email_payload)
+
+    _s, _t, logging_body = call(("GET", "/api/admin/logging"), "GET", "/api/admin/logging", token=token)
+    logging_payload = dict(logging_body) if isinstance(logging_body, dict) else {"level": "INFO", "retention_days": 30}
+    call(("PUT", "/api/admin/logging"), "PUT", "/api/admin/logging", token=token, json_body=logging_payload)
+
+    _s, _t, wns_body = call(("GET", "/api/admin/wns"), "GET", "/api/admin/wns", token=token)
+    wns_payload = {
+        "enabled": bool(wns_body.get("enabled")) if isinstance(wns_body, dict) else False,
+        "package_sid": str(wns_body.get("package_sid") or "") if isinstance(wns_body, dict) else "",
+        "keep_existing_secret": True,
+    }
+    call(("PUT", "/api/admin/wns"), "PUT", "/api/admin/wns", token=token, json_body=wns_payload)
+
+    _s, _t, logs_body = call(("GET", "/api/admin/logs/files"), "GET", "/api/admin/logs/files", token=token)
+    log_filename = "missing-validation.log"
+    if isinstance(logs_body, list) and logs_body and isinstance(logs_body[0], dict) and logs_body[0].get("filename"):
+        log_filename = str(logs_body[0]["filename"])
+    call(("GET", "/api/admin/logs/files/{filename}"), "GET", f"/api/admin/logs/files/{urllib.parse.quote(log_filename)}", token=token, expected={200, 404})
+
+    documented = {(row["method"], row["path"]) for row in documented_api_routes()}
+    missing = sorted([f"{method} {path}" for method, path in documented if (method, path) not in exercised])
+    if missing:
+        failures.append("documented endpoint(s) not exercised: " + _safe_detail_join(missing, max_items=20))
+    if failures:
+        raise AssertionError(_safe_detail_join(failures, max_items=18))
+    return "PASS", f"Live loopback validation exercised {len(exercised)} documented API endpoints. Observed: " + _safe_detail_join(observations, max_items=20)
 
 
 def _check_live_http(base_url: str | None) -> str:
@@ -792,11 +1236,14 @@ def run_admin_validation(
     _run_check(report, "Environment", "Version metadata and DB schema version", lambda: _check_version_and_db(db))
     _run_check(report, "Environment", "Configuration sanity", _check_config_sanity)
     _run_check(report, "Environment", "Dependency inventory and optional CVE tooling", _check_dependency_inventory)
+    _run_check(report, "Environment", "Documented API endpoint inventory", _check_api_endpoint_inventory)
+    _run_check(report, "Environment", "Orphaned release artifact scan", _check_orphaned_release_artifacts)
     _run_check(report, "Environment", "Application log file access", _check_log_files_access)
 
     _run_check(report, "Security", "Runtime secret strength", _check_settings_security, security=True)
     _run_check(report, "Security", "High-risk source pattern scan", _scan_source_for_risky_patterns, security=True)
     _run_check(report, "Security", "Browser security header source check", _check_security_headers_source, security=True)
+    _run_check(report, "Security", "Installation-specific credentials and secrets", lambda: _check_installation_specific_security(db), security=True)
     _run_check(report, "Security", "Live unauthenticated HTTP access controls", lambda: _check_live_http(base_url), security=True)
 
     fixture = _ValidationFixture(db)
@@ -810,6 +1257,7 @@ def run_admin_validation(
         _run_check(report, "Feature validation", "Manager assignment and follow/unfollow", fixture.check_manager_assignment_following)
         _run_check(report, "Feature validation", "Notification services and in-app notifications", fixture.check_notification_services_and_in_app)
         _run_check(report, "Feature validation", "Admin settings, integrations, and DB export validation", fixture.check_admin_settings_export_and_integrations)
+        _run_check(report, "Feature validation", "Live documented API endpoint exercise", lambda: _check_live_documented_api_endpoints(base_url, fixture), security=True)
     finally:
         try:
             fixture.cleanup()

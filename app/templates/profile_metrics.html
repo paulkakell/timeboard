@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+  <div>
+    <h1 class="h4 mb-1">My metrics</h1>
+    <p class="text-muted mb-0">Task completion, due-date, overdue-time, and notification metrics for {{ current_user.username }}.</p>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="/profile">Back to profile</a>
+</div>
+
+{% set tasks = metrics.tasks %}
+{% set completion = metrics.completion %}
+{% set time = metrics.time %}
+{% set notifications = metrics.notifications %}
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3">
+    <div class="card card-body h-100">
+      <div class="text-muted small">Active tasks</div>
+      <div class="display-6">{{ tasks.active }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card card-body h-100">
+      <div class="text-muted small">Past due</div>
+      <div class="display-6 text-danger">{{ tasks.past_due }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card card-body h-100">
+      <div class="text-muted small">Completed · 7 days</div>
+      <div class="display-6">{{ tasks.completed_7d }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card card-body h-100">
+      <div class="text-muted small">Completed · 30 days</div>
+      <div class="display-6">{{ tasks.completed_30d }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <div class="card card-body h-100">
+      <h2 class="h6">Task status</h2>
+      <table class="table table-sm mb-0">
+        <tbody>
+          <tr><th>Total</th><td class="text-end">{{ tasks.total }}</td></tr>
+          <tr><th>Upcoming</th><td class="text-end">{{ tasks.all_upcoming_due }}</td></tr>
+          <tr><th>Due in 0–8h</th><td class="text-end">{{ tasks.due_in_0_8h }}</td></tr>
+          <tr><th>Due in 8–24h</th><td class="text-end">{{ tasks.due_in_8_24h }}</td></tr>
+          <tr><th>Due after 24h</th><td class="text-end">{{ tasks.due_in_over_24h }}</td></tr>
+          <tr><th>Archived</th><td class="text-end">{{ tasks.archived }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card card-body h-100">
+      <h2 class="h6">Completion timing</h2>
+      <table class="table table-sm mb-0">
+        <tbody>
+          <tr><th>On-time completion rate · 30 days</th><td class="text-end">{{ completion.on_time_completion_rate_30d if completion.on_time_completion_rate_30d is not none else "—" }}{% if completion.on_time_completion_rate_30d is not none %}%{% endif %}</td></tr>
+          <tr><th>Completed on time · 30 days</th><td class="text-end">{{ completion.completed_30d_on_time }}</td></tr>
+          <tr><th>Completed late · 30 days</th><td class="text-end">{{ completion.completed_30d_late }}</td></tr>
+          <tr><th>Average late duration · 30 days</th><td class="text-end">{% if completion.average_late_seconds_30d is not none %}{{ (completion.average_late_seconds_30d / 3600)|round(2) }} h{% else %}—{% endif %}</td></tr>
+          <tr><th>Average create-to-complete · 30 days</th><td class="text-end">{% if completion.average_created_to_completed_seconds_30d is not none %}{{ (completion.average_created_to_completed_seconds_30d / 3600)|round(2) }} h{% else %}—{% endif %}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card card-body h-100">
+      <h2 class="h6">Time pressure</h2>
+      <table class="table table-sm mb-0">
+        <tbody>
+          <tr><th>Total overdue active task-hours</th><td class="text-end">{{ time.active_overdue_hours_total }}</td></tr>
+          <tr><th>Oldest active overdue age</th><td class="text-end">{{ (time.oldest_active_overdue_seconds / 3600)|round(2) }} h</td></tr>
+          <tr><th>Next due</th><td class="text-end">{{ tasks.next_due_at_utc or "—" }}</td></tr>
+          <tr><th>Last completed</th><td class="text-end">{{ tasks.last_completed_at_utc or "—" }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card card-body h-100">
+      <h2 class="h6">Notifications</h2>
+      <table class="table table-sm mb-0">
+        <tbody>
+          <tr><th>Services</th><td class="text-end">{{ notifications.services_total }}</td></tr>
+          <tr><th>Enabled services</th><td class="text-end">{{ notifications.services_enabled }}</td></tr>
+          <tr><th>Events · 24h</th><td class="text-end">{{ notifications.events_24h }}</td></tr>
+          <tr><th>Failures · 24h</th><td class="text-end">{{ notifications.events_failed_24h }}</td></tr>
+          <tr><th>Unread in-app</th><td class="text-end">{{ notifications.in_app_unread }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card card-body mt-3">
+  <h2 class="h6">API exports</h2>
+  <p class="mb-2">The same metrics are available from <code>/api/metrics/me</code>. Admins can export deployment metrics from <code>/api/metrics/deployment</code>, <code>/api/metrics/prometheus</code>, and <code>/api/metrics/influx</code>.</p>
+  <p class="small text-muted mb-0">Generated {{ metrics.generated_at_utc }}.</p>
+</div>
+{% endblock %}

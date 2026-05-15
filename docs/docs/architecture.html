@@ -37,7 +37,7 @@
       <div class="container">
         <div class="kicker"><span class="dot"></span><span>Docs · Architecture</span></div>
         <h1>Architecture</h1>
-        <p class="lead">A small, practical architecture: FastAPI + templates, SQLite storage, background jobs for recurrence and reminders.</p>
+        <p class="lead">A small, practical architecture: FastAPI + templates, SQLite storage, background jobs for recurrence/reminders, and metrics exports.</p>
       </div>
     </section>
 
@@ -59,6 +59,11 @@
             <div class="badge">Jobs</div>
             <h3>Background scheduler</h3>
             <p>Runs periodic tasks: overdue reminders, purges, and demo resets. These jobs are part of the application lifecycle.</p>
+          </div>
+          <div class="card">
+            <div class="badge">Observability</div>
+            <h3>Metrics exports</h3>
+            <p>Builds deployment and per-user metrics from the SQLite data model and exposes JSON, Prometheus text, InfluxDB line protocol, and Homepage Custom API payloads.</p>
           </div>
         </div>
       </div>
@@ -87,7 +92,7 @@
         <h2>Notifications</h2>
         <p>
           Notifications are configurable per user and can be delivered through multiple services: browser (SSE), email, generic webhooks,
-          Gotify, ntfy, and WNS. Notification settings are stored in the database.
+          Gotify, ntfy, Discord, generic webhooks, generic API calls, and WNS. Notification settings are stored in the database.
         </p>
         <p class="small">Webhooks include a shared secret header for validation.</p>
       </div>

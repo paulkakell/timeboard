@@ -6,6 +6,7 @@ import pytest
 from app.config import get_settings
 from app.db import Base
 from app.migrations import ensure_db_schema
+from app.crud import create_user
 from app.models import User
 from app.validation import redact_validation_text, run_admin_validation
 
@@ -88,9 +89,14 @@ def test_admin_validation_runs_and_cleans_isolated_records(settings_tmp, tmp_pat
 
     db = make_session(engine)
     try:
+        create_user(db, username="existing-admin", password="VeryStrongValidationPass!234567890", email="admin@example.com", is_admin=True)
         report = run_admin_validation(db, actor="pytest", base_url=None, write_log=False)
         names = [u.username for u in db.query(User).all()]
         assert not any(name.startswith("tbval") for name in names)
+        assert any(f.name == "Documented API endpoint inventory" and f.status == "PASS" for f in report.findings)
+        assert any(f.name == "Orphaned release artifact scan" and f.status == "PASS" for f in report.findings)
+        assert any(f.name == "Installation-specific credentials and secrets" and f.status in {"PASS", "WARN"} for f in report.findings)
+        assert any(f.name == "Notification services and in-app notifications" and "all allowed channels" in f.detail for f in report.findings)
         assert any(f.name == "Past-due tag bar data source" and f.status == "PASS" for f in report.findings)
         assert any(f.name == "Isolated validation fixture cleanup" and f.status == "PASS" for f in report.findings)
         assert "TimeboardApp validation report" in report.to_text()

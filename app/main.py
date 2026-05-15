@@ -29,7 +29,7 @@ from .meta_settings import (
 from .migrations import ensure_db_schema
 from .models import Task, TaskStatus, User
 from .notifications import EVENT_PAST_DUE, notify_task_event, shutdown_notification_dispatcher
-from .routers import api_admin, api_auth, api_notifications, api_tags, api_tasks, api_users, ui
+from .routers import api_admin, api_auth, api_homepage, api_metrics, api_notifications, api_tags, api_tasks, api_users, ui
 from .utils.time_utils import format_dt_display, to_local
 from .version import APP_VERSION
 
@@ -43,6 +43,7 @@ logger = logging.getLogger("timeboardapp")
 
 
 app = FastAPI(title=settings.app.name, version=APP_VERSION)
+app.state.started_at_utc = datetime.utcnow().replace(tzinfo=None)
 
 app.add_middleware(SessionMiddleware, secret_key=settings.security.session_secret)
 
@@ -87,6 +88,8 @@ app.include_router(api_users.router, prefix="/api/users", tags=["users"])
 app.include_router(api_tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(api_tags.router, prefix="/api/tags", tags=["tags"])
 app.include_router(api_notifications.router, prefix="/api/notifications", tags=["notifications"])
+app.include_router(api_metrics.router, prefix="/api/metrics", tags=["metrics"])
+app.include_router(api_homepage.router, prefix="/api/homepage", tags=["homepage"])
 app.include_router(api_admin.router, prefix="/api/admin", tags=["admin"])
 
 app.include_router(ui.router)
