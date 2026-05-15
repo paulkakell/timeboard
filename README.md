@@ -2,7 +2,7 @@
 
 A lightweight, dockerized task board that supports recurrence intervals shorter than a day.
 
-Current version: **00.12.02**
+Current version: **00.12.03**
 
 Website:
 - https://timeboardapp.com
@@ -107,7 +107,9 @@ TimeboardApp loads settings from:
 
 - `TIMEBOARDAPP_SETTINGS` (default: `/data/settings.yml`)
 
-On first run, if the settings file does not exist, TimeboardApp copies `settings.sample.yml` into place and replaces sample session/JWT secret placeholders with random runtime secrets.
+On first run, if the settings file does not exist, TimeboardApp copies `settings.sample.yml` into place and replaces sample session/JWT secret placeholders with random runtime secrets. On upgrade, existing `settings.yml` files that still contain placeholder, blank, or too-short signing secrets are repaired with new random values on startup. Weak secret environment overrides such as `CHANGE_ME_*` are ignored so they cannot force an insecure runtime configuration.
+
+Secret rotation invalidates existing browser sessions and API tokens; affected users must sign in again.
 
 Common settings:
 
@@ -142,7 +144,7 @@ Docker CLI equivalent:
 docker compose exec timeboardapp python -m app.cli validate --base-url http://127.0.0.1:8888
 ```
 
-By default, validation logs are written under `/data/validation`. Copy the full output log into ChatGPT with the codebase when you want issues resolved.
+By default, validation logs are written under `/data/validation`. The runtime image includes `pip-audit` so validation can confirm CVE tooling availability; outbound network access is still required for full vulnerability lookups. Copy the full output log into ChatGPT with the codebase when you want issues resolved.
 
 ## API usage
 

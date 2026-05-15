@@ -1,5 +1,16 @@
 # Changelog
 
+## 00.12.03
+
+- Fix/Security: Auto-repair legacy placeholder or short session/JWT secrets in existing `settings.yml` files and ignore weak secret environment overrides so Admin -> Validation no longer fails runtime secret strength on upgraded deployments.
+- Fix/Security: Add application-level browser security headers (`X-Frame-Options`, `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, and HTTPS-only `Strict-Transport-Security`) instead of relying solely on reverse-proxy configuration.
+- Fix: Make username lookup, username authentication, API token user resolution, and username duplicate checks case-insensitive while preserving stored username casing.
+- Additive/Dependency: Add `pip-audit` to runtime requirements so Admin -> Validation can confirm CVE tooling is available in the container.
+- Tests: Add regression coverage for placeholder secret repair, weak env-secret override handling, case-insensitive username authentication/duplicate denial, and emitted browser security headers.
+
+Compatibility: Backward compatible (no DB schema changes). Existing active sessions and API tokens may be invalidated once legacy placeholder secrets are automatically rotated.
+
+Refs: Issue Admin -> Validation 2 warnings / 2 failures, Commit N/A
 
 ## 00.12.02
 

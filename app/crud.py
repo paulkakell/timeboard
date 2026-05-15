@@ -143,7 +143,10 @@ def clear_in_app_unread(db: Session, *, user_id: int, when_utc: datetime | None 
 
 
 def get_user_by_username(db: Session, username: str) -> Optional[User]:
-    return db.query(User).filter(User.username == username).first()
+    uname = (username or "").strip()
+    if not uname:
+        return None
+    return db.query(User).filter(func.lower(User.username) == uname.lower()).first()
 
 
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
@@ -240,7 +243,7 @@ def create_user(
     if not uname:
         raise ValueError("Username is required")
 
-    existing_username = db.query(User).filter(User.username == uname).first()
+    existing_username = db.query(User).filter(func.lower(User.username) == uname.lower()).first()
     if existing_username:
         raise ValueError("Username already exists")
 
@@ -334,7 +337,7 @@ def update_user_me(
             raise ValueError("Username is required")
         if len(uname) > 64:
             raise ValueError("Username must be 64 characters or less")
-        existing_username = db.query(User).filter(User.username == uname).filter(User.id != user.id).first()
+        existing_username = db.query(User).filter(func.lower(User.username) == uname.lower()).filter(User.id != user.id).first()
         if existing_username:
             raise ValueError("Username already exists")
         user.username = uname
@@ -403,7 +406,7 @@ def update_user_admin(
             raise ValueError("Username is required")
         if len(uname) > 64:
             raise ValueError("Username must be 64 characters or less")
-        existing_username = db.query(User).filter(User.username == uname).filter(User.id != user.id).first()
+        existing_username = db.query(User).filter(func.lower(User.username) == uname.lower()).filter(User.id != user.id).first()
         if existing_username:
             raise ValueError("Username already exists")
         user.username = uname

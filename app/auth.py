@@ -66,7 +66,7 @@ def ensure_admin_user(db: Session) -> None:
 
         admin_password = secrets.token_urlsafe(12)
 
-        existing_admin_username = db.query(User).filter(User.username == "admin").first()
+        existing_admin_username = db.query(User).filter(func.lower(User.username) == "admin").first()
         if existing_admin_username:
             existing_admin_username.is_admin = True
             existing_admin_username.hashed_password = hash_password(admin_password)
@@ -115,11 +115,13 @@ def authenticate_user(db: Session, username_or_email: str, password: str) -> Opt
     if not ident:
         return None
 
-    # Allow login with either username or email.
+    # Allow login with either username or email. Username and email matching are
+    # case-insensitive while preserving the stored display casing.
+    ident_lower = ident.lower()
     q = db.query(User).filter(
         or_(
-            User.username == ident,
-            func.lower(User.email) == ident.lower(),
+            func.lower(User.username) == ident_lower,
+            func.lower(User.email) == ident_lower,
         )
     )
     user = q.first()
@@ -160,7 +162,7 @@ def get_current_user_api(db: Session = Depends(get_db), token: str = Depends(oau
     except JWTError:
         raise credentials_exception
 
-    user = db.query(User).filter(User.username == username).first()
+    user = db.query(User).filter(func.lower(User.username) == str(username).lower()).first()
     if user is None:
         raise credentials_exception
     return user

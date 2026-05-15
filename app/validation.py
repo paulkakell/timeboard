@@ -329,6 +329,14 @@ def _check_config_sanity() -> str:
     )
 
 
+
+
+def _normalize_package_name(name: str) -> str:
+    """Normalize Python distribution names per PEP 503 conventions."""
+
+    return re.sub(r"[-_.]+", "-", str(name or "")).lower().strip("-")
+
+
 def _check_dependency_inventory() -> tuple[str, str]:
     required_names: list[str] = []
     req_path = Path(__file__).resolve().parent.parent / "requirements.txt"
@@ -339,9 +347,12 @@ def _check_dependency_inventory() -> tuple[str, str]:
                 continue
             name = re.split(r"[<>=!~\[]", line, maxsplit=1)[0].strip()
             if name:
-                required_names.append(name.lower())
+                required_names.append(_normalize_package_name(name))
 
-    installed = {dist.metadata.get("Name", "").lower(): dist.version for dist in importlib.metadata.distributions()}
+    installed = {
+        _normalize_package_name(dist.metadata.get("Name", "")): dist.version
+        for dist in importlib.metadata.distributions()
+    }
     missing = [name for name in required_names if name not in installed]
     pip_audit_available = shutil.which("pip-audit") is not None
     detail = f"requirements={len(required_names)}; installed_distributions={len(installed)}"

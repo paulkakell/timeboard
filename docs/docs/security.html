@@ -53,11 +53,13 @@
         </ul>
 
         <p>
-          Generate strong random values for both. In production, prefer environment variables to keep secrets out of files.
+          Generate strong random values for both. In production, prefer environment variables to keep secrets out of files. Values must be non-placeholder and at least 32 characters long. Existing settings files that still contain placeholder or short signing secrets are repaired automatically on startup.
         </p>
 
         <div class="code"><pre><code>export TIMEBOARDAPP_SESSION_SECRET="..."
 export TIMEBOARDAPP_JWT_SECRET="..."</code></pre></div>
+
+        <p class="small">Secret repair or manual secret rotation invalidates existing browser sessions and API tokens; users must sign in again.</p>
       </div>
     </section>
 
@@ -98,7 +100,7 @@ export TIMEBOARDAPP_JWT_SECRET="..."</code></pre></div>
         <h2>Reverse proxy + TLS</h2>
         <p>
           For Internet-facing deployments, terminate TLS at a reverse proxy and keep TimeboardApp on a private network.
-          Ensure your proxy forwards the standard headers so the app can generate correct external links.
+          Ensure your proxy forwards the standard headers so the app can generate correct external links. TimeboardApp emits baseline browser security headers itself, including frame denial, a content security policy, MIME-sniffing protection, and HTTPS-only HSTS when the request scheme or forwarded protocol is HTTPS.
         </p>
 
         <ul class="list">

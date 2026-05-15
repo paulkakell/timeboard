@@ -96,3 +96,11 @@ def test_admin_validation_runs_and_cleans_isolated_records(settings_tmp, tmp_pat
         assert "TimeboardApp validation report" in report.to_text()
     finally:
         db.close()
+
+def test_dependency_inventory_normalizes_distribution_names() -> None:
+    from app.validation import _normalize_package_name
+
+    assert _normalize_package_name("pip_audit") == "pip-audit"
+    assert _normalize_package_name("python.multipart") == "python-multipart"
+    assert _normalize_package_name("SQLAlchemy") == "sqlalchemy"
+

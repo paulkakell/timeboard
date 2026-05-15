@@ -46,8 +46,9 @@
         <h2>Settings file</h2>
         <p>
           The app reads a YAML file (default path: <code>/data/settings.yml</code> in Docker). If the file is missing, TimeboardApp creates a minimal one.
-          A full example is included as <code>settings.sample.yml</code> in the repository. If a runtime settings file is generated on first run, sample session/JWT secret placeholders are replaced with random secrets.
+          A full example is included as <code>settings.sample.yml</code> in the repository. If a runtime settings file is generated on first run, sample session/JWT secret placeholders are replaced with random secrets. On upgrade, existing settings files with placeholder, blank, or too-short signing secrets are repaired with new random values.
         </p>
+        <p class="small">Secret repair invalidates existing browser sessions and API tokens. Weak placeholder environment overrides are ignored; use non-placeholder values at least 32 characters long when overriding secrets.</p>
 
         <div class="code"><pre><code>app:
   name: "TimeboardApp"
@@ -98,7 +99,7 @@
 
         <div class="callout">
           <strong>Compatibility</strong>
-          <div class="small">Legacy environment variable names (without the <code>APP</code> suffix) are still accepted for upgrades.</div>
+          <div class="small">Legacy environment variable names (without the <code>APP</code> suffix) are still accepted for upgrades. Placeholder or too-short secret overrides are ignored for runtime safety.</div>
         </div>
       </div>
     </section>

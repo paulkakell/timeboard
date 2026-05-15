@@ -25,6 +25,76 @@ def _env(suffix: str) -> str | None:
 DEFAULT_SETTINGS_PATH = _env("SETTINGS") or "/data/settings.yml"
 
 
+WEAK_SECRET_VALUES = {
+    "",
+    "CHANGE_ME_SESSION_SECRET",
+    "CHANGE_ME_JWT_SECRET",
+    "test-session-secret",
+    "test-jwt-secret",
+    "secret",
+    "password",
+}
+
+
+def _is_weak_runtime_secret(value: str | None) -> bool:
+    """Return True when a runtime signing secret is unsafe for deployment."""
+
+    v = str(value or "").strip()
+    return (not v) or v in WEAK_SECRET_VALUES or v.startswith("CHANGE_ME") or len(v) < 32
+
+
+def _new_runtime_secret() -> str:
+    """Generate a high-entropy URL-safe signing secret."""
+
+    return secrets.token_urlsafe(48)
+
+
+def _repair_runtime_secrets(raw: Dict[str, Any], path: str) -> Dict[str, Any]:
+    """Replace legacy placeholder secrets in settings.yml with durable values.
+
+    Earlier packages shipped sample placeholders and only generated runtime
+    secrets when the settings file did not exist. Existing deployments that
+    already had a placeholder-bearing settings.yml could therefore keep weak
+    secrets indefinitely. Repairing the YAML mapping here keeps startup and
+    Admin -> Validation secure without requiring manual file edits.
+    """
+
+    security = raw.get("security")
+    if security is None:
+        security = {}
+        raw["security"] = security
+    if not isinstance(security, dict):
+        raise ValueError("settings.yml security section must be a YAML mapping")
+
+    session_secret = str(security.get("session_secret") or "")
+    jwt_secret = str(security.get("jwt_secret") or "")
+    changed = False
+
+    if _is_weak_runtime_secret(session_secret):
+        session_secret = _new_runtime_secret()
+        security["session_secret"] = session_secret
+        changed = True
+
+    if _is_weak_runtime_secret(jwt_secret) or jwt_secret == session_secret:
+        jwt_secret = _new_runtime_secret()
+        while jwt_secret == session_secret:
+            jwt_secret = _new_runtime_secret()
+        security["jwt_secret"] = jwt_secret
+        changed = True
+
+    if changed:
+        try:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+        except Exception:
+            # Keep the secure in-memory settings even if the file cannot be
+            # rewritten. A writable /data volume will persist the rotation.
+            pass
+
+    return raw
+
+
 class AppSettings(BaseModel):
     name: str = "TimeboardApp"
     timezone: str = "UTC"
@@ -108,8 +178,8 @@ def _ensure_settings_file(path: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
 
     # Copy sample settings into place while replacing secret placeholders.
-    session_secret = secrets.token_urlsafe(32)
-    jwt_secret = secrets.token_urlsafe(32)
+    session_secret = _new_runtime_secret()
+    jwt_secret = _new_runtime_secret()
     sample = Path(__file__).resolve().parent.parent / "settings.sample.yml"
     if sample.exists():
         text = sample.read_text(encoding="utf-8")
@@ -140,16 +210,26 @@ def _load_yaml(path: str) -> Dict[str, Any]:
 def get_settings() -> Settings:
     settings_path = _env("SETTINGS") or DEFAULT_SETTINGS_PATH
     _ensure_settings_file(settings_path)
-    raw = _load_yaml(settings_path)
+    raw = _repair_runtime_secrets(_load_yaml(settings_path), settings_path)
     s = Settings.model_validate(raw)
 
-    # Allow env overrides for secrets.
+    # Allow env overrides for strong secrets. Weak placeholder overrides are
+    # ignored so legacy compose/env files cannot force insecure runtime signing.
     session_secret = _env("SESSION_SECRET")
     jwt_secret = _env("JWT_SECRET")
-    if session_secret:
+    if session_secret and not _is_weak_runtime_secret(session_secret):
         s.security.session_secret = session_secret
-    if jwt_secret:
+    if jwt_secret and not _is_weak_runtime_secret(jwt_secret):
         s.security.jwt_secret = jwt_secret
+
+    # Final defense-in-depth: ensure the in-memory runtime secrets are strong
+    # and distinct even if an override or malformed file bypassed repair.
+    if _is_weak_runtime_secret(s.security.session_secret):
+        s.security.session_secret = _new_runtime_secret()
+    if _is_weak_runtime_secret(s.security.jwt_secret) or s.security.jwt_secret == s.security.session_secret:
+        s.security.jwt_secret = _new_runtime_secret()
+        while s.security.jwt_secret == s.security.session_secret:
+            s.security.jwt_secret = _new_runtime_secret()
 
     # Public base URL override (useful for external notifications).
     base_url_env = _env("BASE_URL")
