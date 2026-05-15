@@ -545,6 +545,31 @@ def list_tags_for_user(db: Session, *, user: User) -> list[Tag]:
     return q.all()
 
 
+def list_past_due_tags_for_user(
+    db: Session,
+    *,
+    user: User,
+    when_utc: datetime | None = None,
+) -> list[dict[str, int | str]]:
+    """Return tags attached to this user's active tasks that are past due."""
+
+    now = (when_utc or _now_utc_naive()).replace(tzinfo=None)
+    rows = (
+        db.query(Tag.id, Tag.name, func.count(func.distinct(Task.id)))
+        .join(Tag.tasks)
+        .filter(Task.user_id == int(user.id))
+        .filter(Task.status == TaskStatus.active)
+        .filter(Task.due_date_utc < now)
+        .group_by(Tag.id, Tag.name)
+        .order_by(Tag.name.asc())
+        .all()
+    )
+    return [
+        {"id": int(tag_id), "name": str(name), "task_count": int(task_count or 0)}
+        for tag_id, name, task_count in rows
+    ]
+
+
 # ---------------------- Tasks ----------------------
 
 

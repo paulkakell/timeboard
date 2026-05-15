@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-import shutil
+import secrets
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict
@@ -107,15 +107,20 @@ def _ensure_settings_file(path: str) -> None:
 
     p.parent.mkdir(parents=True, exist_ok=True)
 
-    # Copy sample settings into place to make first-run behavior predictable.
+    # Copy sample settings into place while replacing secret placeholders.
+    session_secret = secrets.token_urlsafe(32)
+    jwt_secret = secrets.token_urlsafe(32)
     sample = Path(__file__).resolve().parent.parent / "settings.sample.yml"
     if sample.exists():
-        shutil.copy(sample, p)
+        text = sample.read_text(encoding="utf-8")
+        text = text.replace("CHANGE_ME_SESSION_SECRET", session_secret)
+        text = text.replace("CHANGE_ME_JWT_SECRET", jwt_secret)
+        p.write_text(text, encoding="utf-8")
     else:
         # Minimal fallback
         p.write_text(
             "app:\n  name: 'TimeboardApp'\n  timezone: 'UTC'\n  host: '0.0.0.0'\n  port: 8888\n"
-            "security:\n  session_secret: 'CHANGE_ME_SESSION_SECRET'\n  jwt_secret: 'CHANGE_ME_JWT_SECRET'\n"
+            f"security:\n  session_secret: '{session_secret}'\n  jwt_secret: '{jwt_secret}'\n"
             "database:\n  path: '/data/timeboardapp.db'\n"
             "purge:\n  default_days: 15\n  interval_minutes: 60\n"
             "demo:\n  enabled: false\n  reset_interval_minutes: 360\n  disable_external_apis: true\n"
