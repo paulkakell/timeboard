@@ -62,3 +62,26 @@ the cell color.
 .copy-to-clipboard {
   cursor: pointer;
 }
+
+/* Sticky past-due tag shortcut bar */
+.tb-past-due-tag-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1020;
+}
+
+.tb-past-due-tag-bar[hidden] {
+  display: none !important;
+}
+
+.tb-past-due-tag-buttons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  overflow-x: auto;
+  padding-bottom: 0.125rem;
+}
+
+.tb-past-due-tag-buttons .btn {
+  white-space: nowrap;
+}

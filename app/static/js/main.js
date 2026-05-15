@@ -211,11 +211,87 @@
     });
   }
 
+  function initPastDueTagBar() {
+    const bar = document.getElementById('tbPastDueTagBar');
+    if (!bar) return;
+
+    const buttons = document.getElementById('tbPastDueTagBarButtons');
+    const status = document.getElementById('tbPastDueTagBarStatus');
+    if (!buttons) return;
+
+    const endpoint = bar.getAttribute('data-endpoint') || '/ui/past-due-tags';
+
+    const clearButtons = () => {
+      while (buttons.firstChild) buttons.removeChild(buttons.firstChild);
+    };
+
+    const setStatus = (message) => {
+      if (status) status.textContent = message || '';
+    };
+
+    const openDashboardTab = (url) => {
+      const target = String(url || '');
+      if (!target.startsWith('/dashboard?')) return;
+      const win = window.open(target, '_blank', 'noopener');
+      if (win) {
+        try { win.opener = null; } catch (e) { /* ignore */ }
+      }
+    };
+
+    const render = (tags) => {
+      const arr = Array.isArray(tags) ? tags : [];
+      clearButtons();
+      if (!arr.length) {
+        bar.hidden = true;
+        setStatus('No active past-due tags');
+        return;
+      }
+
+      arr.forEach((item) => {
+        const name = String(item && item.name ? item.name : '').trim();
+        const url = String(item && item.url ? item.url : '');
+        if (!name || !url.startsWith('/dashboard?')) return;
+
+        const count = Number(item.task_count || 0);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-sm btn-outline-danger';
+        btn.textContent = count > 0 ? `${name} (${count})` : name;
+        btn.setAttribute('aria-label', `Open dashboard tasks tagged ${name}`);
+        btn.addEventListener('click', () => openDashboardTab(url));
+        buttons.appendChild(btn);
+      });
+
+      bar.hidden = buttons.children.length === 0;
+      setStatus(buttons.children.length ? `${buttons.children.length} past-due tag shortcut(s)` : 'No active past-due tags');
+    };
+
+    const refresh = () => {
+      fetch(endpoint, { credentials: 'same-origin' })
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (!data || data.enabled === false) {
+            render([]);
+            return;
+          }
+          render(data.tags);
+        })
+        .catch(() => render([]));
+    };
+
+    refresh();
+    window.setInterval(refresh, 30000);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) refresh();
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     applySystemTheme();
     initRecurrenceForm();
     initCopyToClipboard();
     initInAppNotifications();
+    initPastDueTagBar();
 
     // Browser notifications (best-effort): EventSource + Notification API.
     try {
