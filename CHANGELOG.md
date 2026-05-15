@@ -1,6 +1,16 @@
 # Changelog
 
 
+## 00.12.02
+
+- Fix: Update UI template rendering calls to use the request-first `TemplateResponse` signature so the dashboard and other server-rendered pages launch correctly on newer Starlette/FastAPI deployments.
+- Tests: Add regression coverage that flags any UI template render call that omits `request` as the first argument.
+
+Compatibility: Backward compatible (no DB schema changes).
+
+Refs: Issue docker deploy Internal Server Error / TemplateResponse TypeError, Commit N/A
+
+
 ## 00.12.01
 
 - Fix: Restore the TimeboardApp configuration loader module so `python -m app.run` can import `get_settings` during Docker startup.

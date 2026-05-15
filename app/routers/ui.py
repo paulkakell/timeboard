@@ -721,6 +721,7 @@ def login_get(request: Request, db: Session = Depends(get_db)):
         success_msg = "Import complete. Please sign in again."
 
     return templates.TemplateResponse(
+        request,
         "login.html",
         _template_context(
             request,
@@ -743,6 +744,7 @@ def login_post(
     user = authenticate_user(db, username, password)
     if not user:
         return templates.TemplateResponse(
+            request,
             "login.html",
             _template_context(
                 request,
@@ -766,6 +768,7 @@ def forgot_email_get(request: Request, db: Session = Depends(get_db)):
         return _redirect("/dashboard")
 
     return templates.TemplateResponse(
+        request,
         "forgot_email.html",
         _template_context(
             request,
@@ -786,6 +789,7 @@ def forgot_email_post(
 ):
     if not email_enabled(db):
         return templates.TemplateResponse(
+            request,
             "forgot_email.html",
             _template_context(
                 request,
@@ -819,6 +823,7 @@ def forgot_email_post(
             # Intentionally do not reveal SMTP errors to the end-user.
 
     return templates.TemplateResponse(
+        request,
         "forgot_email.html",
         _template_context(
             request,
@@ -848,6 +853,7 @@ def reset_password_get(request: Request, token: str | None = None, db: Session =
         valid = True
 
     return templates.TemplateResponse(
+        request,
         "reset_password.html",
         _template_context(
             request,
@@ -874,6 +880,7 @@ def reset_password_post(
 
     if len(new_password or "") < 8:
         return templates.TemplateResponse(
+            request,
             "reset_password.html",
             _template_context(
                 request,
@@ -890,6 +897,7 @@ def reset_password_post(
     ok = consume_password_reset_token(db, token=token, new_password=new_password, now_utc=datetime.utcnow())
     if not ok:
         return templates.TemplateResponse(
+            request,
             "reset_password.html",
             _template_context(
                 request,
@@ -1103,6 +1111,7 @@ def dashboard(
     return_to_q = quote(return_to, safe="")
 
     return templates.TemplateResponse(
+        request,
         template_name,
         _template_context(
             request,
@@ -1217,6 +1226,7 @@ def calendar_view(request: Request, db: Session = Depends(get_db)):
     prefs_json = json.dumps(cal_prefs).replace("</", "<\\/")
 
     return templates.TemplateResponse(
+        request,
         "calendar.html",
         _template_context(
             request,
@@ -1305,6 +1315,7 @@ def archived(
     template_name = "archived_mobile.html" if _site_mode(request) == "mobile" else "archived.html"
 
     return templates.TemplateResponse(
+        request,
         template_name,
         _template_context(
             request,
@@ -1365,6 +1376,7 @@ def task_new_get(
             pass
 
     return templates.TemplateResponse(
+        request,
         "task_form.html",
         _template_context(
             request,
@@ -1424,6 +1436,7 @@ def task_new_post(
                 }
             )
             return templates.TemplateResponse(
+                request,
                 "task_form.html",
                 _template_context(
                     request,
@@ -1463,6 +1476,7 @@ def task_new_post(
         if not parent_task:
             ctx = _task_form_context(None)
             return templates.TemplateResponse(
+                request,
                 "task_form.html",
                 _template_context(
                     request,
@@ -1543,6 +1557,7 @@ def task_new_post(
             "tags": tags,
         }
         return templates.TemplateResponse(
+            request,
             "task_form.html",
             _template_context(
                 request,
@@ -1716,6 +1731,7 @@ def task_edit_get(request: Request, task_id: int, next: str | None = None, db: S
 
     ctx = _task_form_context(task)
     return templates.TemplateResponse(
+        request,
         "task_form.html",
         _template_context(
             request,
@@ -1776,6 +1792,7 @@ def task_edit_post(
                 "tags": tags,
             }
             return templates.TemplateResponse(
+                request,
                 "task_form.html",
                 _template_context(
                     request,
@@ -1818,6 +1835,7 @@ def task_edit_post(
             "tags": tags,
         }
         return templates.TemplateResponse(
+            request,
             "task_form.html",
             _template_context(
                 request,
@@ -1867,6 +1885,7 @@ def task_complete(
         for t in getattr(e, "open_tasks", []) or []:
             open_rows.append({"id": int(t.id), "name": t.name, "task_type": t.task_type})
         return templates.TemplateResponse(
+            request,
             "confirm_close_subtasks.html",
             _template_context(
                 request,
@@ -1918,6 +1937,7 @@ def task_delete(
         for t in getattr(e, "open_tasks", []) or []:
             open_rows.append({"id": int(t.id), "name": t.name, "task_type": t.task_type})
         return templates.TemplateResponse(
+            request,
             "confirm_close_subtasks.html",
             _template_context(
                 request,
@@ -2000,6 +2020,7 @@ def profile_get(request: Request, db: Session = Depends(get_db)):
         return _redirect("/login")
 
     return templates.TemplateResponse(
+        request,
         "profile.html",
         _template_context(
             request,
@@ -2045,6 +2066,7 @@ def profile_post(
         )
         db.refresh(user)
         return templates.TemplateResponse(
+            request,
             "profile.html",
             _template_context(
                 request,
@@ -2056,6 +2078,7 @@ def profile_post(
         )
     except Exception as e:
         return templates.TemplateResponse(
+            request,
             "profile.html",
             _template_context(
                 request,
@@ -2092,6 +2115,7 @@ def profile_notifications_get(request: Request, db: Session = Depends(get_db)):
     wns_admin = get_wns_settings(db)
 
     return templates.TemplateResponse(
+        request,
         "profile_notifications.html",
         _template_context(
             request,
@@ -2270,6 +2294,7 @@ async def profile_notifications_post(request: Request, db: Session = Depends(get
     wns_admin = get_wns_settings(db)
 
     return templates.TemplateResponse(
+        request,
         "profile_notifications.html",
         _template_context(
             request,
@@ -2301,6 +2326,7 @@ def notifications_inbox(request: Request, db: Session = Depends(get_db)):
         logger.exception("Failed to list in-app notifications")
 
     return templates.TemplateResponse(
+        request,
         "notifications_inbox.html",
         _template_context(
             request,
@@ -2480,6 +2506,7 @@ def admin_users_get(request: Request, db: Session = Depends(get_db)):
 
     users = list_users(db)
     return templates.TemplateResponse(
+        request,
         "user_admin.html",
         _template_context(
             request,
@@ -2507,6 +2534,7 @@ def admin_users_edit_get(request: Request, user_id: int, db: Session = Depends(g
     manager_options = list_users(db)
 
     return templates.TemplateResponse(
+        request,
         "user_edit.html",
         _template_context(
             request,
@@ -2545,6 +2573,7 @@ def admin_users_edit_post(
 
     if admin.id == user_id and not bool(is_admin):
         return templates.TemplateResponse(
+            request,
             "user_edit.html",
             _template_context(
                 request,
@@ -2578,6 +2607,7 @@ def admin_users_edit_post(
         db.refresh(target)
         manager_options = list_users(db)
         return templates.TemplateResponse(
+            request,
             "user_edit.html",
             _template_context(
                 request,
@@ -2592,6 +2622,7 @@ def admin_users_edit_post(
     except Exception as e:
         manager_options = list_users(db)
         return templates.TemplateResponse(
+            request,
             "user_edit.html",
             _template_context(
                 request,
@@ -2633,6 +2664,7 @@ def admin_users_create(
     if get_user_by_username(db, username):
         users = list_users(db)
         return templates.TemplateResponse(
+            request,
             "user_admin.html",
             _template_context(
                 request,
@@ -2662,6 +2694,7 @@ def admin_users_create(
     except Exception as e:
         users = list_users(db)
         return templates.TemplateResponse(
+            request,
             "user_admin.html",
             _template_context(
                 request,
@@ -2769,6 +2802,7 @@ def admin_database_get(request: Request, db: Session = Depends(get_db)):
         latest_backup = None
 
     return templates.TemplateResponse(
+        request,
         "db_admin.html",
         _template_context(
             request,
@@ -2846,6 +2880,7 @@ def admin_database_auto_backups_post(
         latest_backup = None
 
     return templates.TemplateResponse(
+        request,
         "db_admin.html",
         _template_context(
             request,
@@ -2941,6 +2976,7 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
         except Exception:
             pass
         return templates.TemplateResponse(
+            request,
             "db_admin.html",
             _template_context(
                 request,
@@ -2965,6 +3001,7 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
 
     if errors:
         return templates.TemplateResponse(
+            request,
             "db_admin.html",
             _template_context(
                 request,
@@ -2993,6 +3030,7 @@ def admin_database_import(request: Request, file: UploadFile, db: Session = Depe
         except Exception:
             pass
         return templates.TemplateResponse(
+            request,
             "db_admin.html",
             _template_context(
                 request,
@@ -3071,6 +3109,7 @@ def admin_database_purge_all(
     # Require explicit confirmation.
     if (confirm or "").strip().upper() != "PURGE":
         return templates.TemplateResponse(
+            request,
             "db_admin.html",
             _template_context(
                 request,
@@ -3118,6 +3157,7 @@ def admin_database_purge_all(
         err = str(e)
 
     return templates.TemplateResponse(
+        request,
         "db_admin.html",
         _template_context(
             request,
@@ -3145,6 +3185,7 @@ def admin_email_get(request: Request, db: Session = Depends(get_db)):
 
     cfg = get_email_settings(db)
     return templates.TemplateResponse(
+        request,
         "admin_email.html",
         _template_context(
             request,
@@ -3212,6 +3253,7 @@ async def admin_email_post(request: Request, db: Session = Depends(get_db)):
                 logger.exception("Failed to reconfigure email jobs")
 
         return templates.TemplateResponse(
+            request,
             "admin_email.html",
             _template_context(
                 request,
@@ -3225,6 +3267,7 @@ async def admin_email_post(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         cfg = get_email_settings(db)
         return templates.TemplateResponse(
+            request,
             "admin_email.html",
             _template_context(
                 request,
@@ -3246,6 +3289,7 @@ def admin_notifications_get(request: Request, db: Session = Depends(get_db)):
 
     wns_cfg = get_wns_settings(db)
     return templates.TemplateResponse(
+        request,
         "admin_notifications.html",
         _template_context(
             request,
@@ -3282,6 +3326,7 @@ async def admin_notifications_post(request: Request, db: Session = Depends(get_d
             keep_existing_secret=keep_existing_secret,
         )
         return templates.TemplateResponse(
+            request,
             "admin_notifications.html",
             _template_context(
                 request,
@@ -3295,6 +3340,7 @@ async def admin_notifications_post(request: Request, db: Session = Depends(get_d
     except Exception as e:
         wns_cfg = get_wns_settings(db)
         return templates.TemplateResponse(
+            request,
             "admin_notifications.html",
             _template_context(
                 request,
@@ -3354,6 +3400,7 @@ def admin_logs_get(request: Request, file: str | None = None, db: Session = Depe
             content = None
 
     return templates.TemplateResponse(
+        request,
         "admin_logs.html",
         _template_context(
             request,
@@ -3403,6 +3450,7 @@ async def admin_logs_post(request: Request, db: Session = Depends(get_db)):
                 continue
 
         return templates.TemplateResponse(
+            request,
             "admin_logs.html",
             _template_context(
                 request,
@@ -3433,6 +3481,7 @@ async def admin_logs_post(request: Request, db: Session = Depends(get_db)):
                 continue
 
         return templates.TemplateResponse(
+            request,
             "admin_logs.html",
             _template_context(
                 request,
@@ -3535,6 +3584,7 @@ def admin_validation_get(request: Request, log: str | None = None, db: Session =
 
     selected, content = _read_validation_log(log)
     return templates.TemplateResponse(
+        request,
         "admin_validation.html",
         _validation_context(
             request,
@@ -3561,6 +3611,7 @@ def admin_validation_run(
     expected = str(request.session.get("admin_validation_csrf") or "")
     if not expected or not secrets.compare_digest(expected, str(csrf_token or "")):
         return templates.TemplateResponse(
+            request,
             "admin_validation.html",
             _validation_context(request, user, db, error="Invalid validation request", success=None),
             status_code=400,
@@ -3582,6 +3633,7 @@ def admin_validation_run(
             f"FAIL={counts.get('FAIL', 0)}, SKIP={counts.get('SKIP', 0)}."
         )
         return templates.TemplateResponse(
+            request,
             "admin_validation.html",
             _validation_context(
                 request,
@@ -3597,6 +3649,7 @@ def admin_validation_run(
     except Exception as e:
         logger.exception("Admin validation run failed")
         return templates.TemplateResponse(
+            request,
             "admin_validation.html",
             _validation_context(request, user, db, error=str(e), success=None),
             status_code=500,
@@ -3629,6 +3682,7 @@ def help_page(request: Request, db: Session = Depends(get_db)):
     """
     user = _get_current_user(request, db)
     return templates.TemplateResponse(
+        request,
         "help.html",
         _template_context(
             request,
