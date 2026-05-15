@@ -2,7 +2,7 @@
 
 A lightweight, dockerized task board that supports recurrence intervals shorter than a day.
 
-Current version: **00.11.00**
+Current version: **00.12.03**
 
 Website:
 - https://timeboardapp.com
@@ -21,12 +21,14 @@ Repository:
 - Light/Dark/System themes.
 - Task Type filtering and sorting.
 - Calendar view with color-coded due-state filtering (per-user, persisted).
+- Optional per-user frozen past-due tag shortcut bar from **Profile**.
 - Archived view for completed/deleted tasks (restore archived tasks back to active).
 - Admin user management:
   - create/delete users
   - promote/demote users between Admin and User
   - dashboard "Views" menu (My Tasks, All Tasks, per-user views)
   - export/import database JSON
+  - full feature and security validation from **Admin → Validation**
 - Email features (when SMTP is configured in the admin UI):
   - hourly overdue reminders
   - password reset via email ("Reset password" link)
@@ -105,7 +107,9 @@ TimeboardApp loads settings from:
 
 - `TIMEBOARDAPP_SETTINGS` (default: `/data/settings.yml`)
 
-On first run, if the settings file does not exist, TimeboardApp copies `settings.sample.yml` into place.
+On first run, if the settings file does not exist, TimeboardApp copies `settings.sample.yml` into place and replaces sample session/JWT secret placeholders with random runtime secrets. On upgrade, existing `settings.yml` files that still contain placeholder, blank, or too-short signing secrets are repaired with new random values on startup. Weak secret environment overrides such as `CHANGE_ME_*` are ignored so they cannot force an insecure runtime configuration.
+
+Secret rotation invalidates existing browser sessions and API tokens; affected users must sign in again.
 
 Common settings:
 
@@ -124,6 +128,23 @@ Common settings:
 Docker note (SMTP): if TimeboardApp is running in a container, setting the SMTP host to `localhost` / `127.0.0.1` will try to connect to the container itself.
 Use a hostname/IP reachable from inside the container (for example: an SMTP container service name on the same docker-compose network, or `host.docker.internal`
 when using Docker Desktop).
+
+
+## Profile shortcuts
+
+Each user can enable **Profile → Dashboard shortcuts → Show frozen past-due tag bar**. When enabled, a sticky top bar dynamically lists tags assigned to that user's active past-due tasks. Selecting a tag opens a new dashboard browser tab filtered to that tag.
+
+## Validation and security testing
+
+Admins can open **Admin → Validation** and run the full validation suite against the running environment. The suite creates isolated temporary users/tasks/services, checks major feature paths, performs security-oriented checks, writes a redacted log, and removes the temporary records. It does not send external email or webhook traffic.
+
+Docker CLI equivalent:
+
+```bash
+docker compose exec timeboardapp python -m app.cli validate --base-url http://127.0.0.1:8888
+```
+
+By default, validation logs are written under `/data/validation`. The runtime image includes `pip-audit` so validation can confirm CVE tooling availability; outbound network access is still required for full vulnerability lookups. Copy the full output log into ChatGPT with the codebase when you want issues resolved.
 
 ## API usage
 
@@ -268,3 +289,9 @@ Security scan (Bandit):
 ```bash
 bandit -r app
 ```
+
+
+### Tasks API summary endpoint
+
+Authenticated API clients can call `GET /api/tasks/summary` to retrieve per-user totals derived from the bearer token. The response includes these counters: `archived`, `past_due`, `all_upcoming_due`, `due_in_0_8h`, `due_in_8_24h`, and `due_in_over_24h`.
+

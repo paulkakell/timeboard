@@ -46,6 +46,37 @@ app = FastAPI(title=settings.app.name, version=APP_VERSION)
 
 app.add_middleware(SessionMiddleware, secret_key=settings.security.session_secret)
 
+
+SECURITY_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "img-src 'self' data:; "
+    "font-src 'self' data: https://cdn.jsdelivr.net; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'none'; "
+    "form-action 'self'"
+)
+
+
+@app.middleware("http")
+async def add_browser_security_headers(request: Request, call_next):
+    """Attach baseline browser security headers to every response."""
+
+    response = await call_next(request)
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Content-Security-Policy", SECURITY_CONTENT_SECURITY_POLICY)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+
+    forwarded_proto = str(request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    scheme = forwarded_proto or str(request.url.scheme or "").lower()
+    if scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
 # Static files
 static_path = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
