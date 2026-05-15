@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -39,7 +39,6 @@ from ..crud import (
     is_following_task,
     is_manager_of,
     list_in_app_notifications,
-    list_past_due_tags_for_user,
     list_descendant_tasks,
     list_tasks,
     list_subordinate_user_ids,
@@ -82,7 +81,6 @@ from ..models import (
     Theme,
     User,
     UserNotificationChannel,
-    UserNotificationService,
 )
 from ..notifications import (
     CHANNEL_BROWSER,
@@ -100,7 +98,6 @@ from ..notifications import (
     update_user_notification_service,
     user_has_enabled_browser_service,
 )
-from ..validation import default_validation_log_dir, run_admin_validation
 from ..utils.humanize import humanize_timedelta, time_left_class, seconds_to_duration_str
 from ..utils.time_utils import iso_for_datetime_local_input, now_utc, to_local
 from ..version import APP_VERSION
@@ -284,32 +281,6 @@ def _save_calendar_prefs_for_user(db: Session, *, user: User, prefs: dict[str, A
         user.ui_prefs_json = json.dumps(existing, separators=(",", ":"))
     except Exception:
         # If serialization fails, don't break the UI.
-        return
-
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-
-PAST_DUE_TAG_BAR_PREF_KEY = "past_due_tag_bar"
-
-
-def _past_due_tag_bar_enabled(user: User) -> bool:
-    ui = _parse_ui_prefs_json(getattr(user, "ui_prefs_json", None))
-    pref = ui.get(PAST_DUE_TAG_BAR_PREF_KEY) if isinstance(ui.get(PAST_DUE_TAG_BAR_PREF_KEY), dict) else {}
-    return bool(pref.get("enabled", False))
-
-
-def _save_past_due_tag_bar_pref(db: Session, *, user: User, enabled: bool) -> None:
-    existing = _parse_ui_prefs_json(getattr(user, "ui_prefs_json", None))
-    current = existing.get(PAST_DUE_TAG_BAR_PREF_KEY)
-    if not isinstance(current, dict):
-        current = {}
-    existing[PAST_DUE_TAG_BAR_PREF_KEY] = {**current, "enabled": bool(enabled)}
-
-    try:
-        user.ui_prefs_json = json.dumps(existing, separators=(",", ":"))
-    except Exception:
         return
 
     db.add(user)
@@ -563,10 +534,6 @@ def _template_context(request: Request, user: Optional[User], db: Session | None
             extra["in_app_unread_count"] = count_in_app_unread(db, user_id=int(user.id))
         except Exception:
             extra["in_app_unread_count"] = 0
-
-    # Per-user past-due tag bar toggle.
-    if user and "past_due_tag_bar_enabled" not in extra:
-        extra["past_due_tag_bar_enabled"] = _past_due_tag_bar_enabled(user)
 
     # Navbar search value.
     if user and "nav_search_q" not in extra:
@@ -1955,44 +1922,6 @@ def task_restore(request: Request, task_id: int, db: Session = Depends(get_db)):
     return _redirect("/archived")
 
 
-
-@router.get("/ui/past-due-tags")
-def ui_past_due_tags(request: Request, db: Session = Depends(get_db)):
-    user = _get_current_user(request, db)
-    if not user:
-        return JSONResponse({"enabled": False, "tags": []}, status_code=401)
-
-    if not _past_due_tag_bar_enabled(user):
-        return JSONResponse({"enabled": False, "tags": []})
-
-    rows = list_past_due_tags_for_user(db, user=user)
-    tags: list[dict[str, Any]] = []
-    for row in rows:
-        name = str(row.get("name") or "").strip()
-        if not name:
-            continue
-        params = {"reset": "1", "tag": name, "page": "1"}
-        if bool(getattr(user, "is_admin", False)):
-            # Admin dashboard defaults to the current admin's own tasks when user_id is set.
-            params["user_id"] = str(int(user.id))
-        tags.append(
-            {
-                "id": int(row.get("id") or 0),
-                "name": name,
-                "task_count": int(row.get("task_count") or 0),
-                "url": "/dashboard?" + urlencode(params),
-            }
-        )
-
-    return JSONResponse(
-        {
-            "enabled": True,
-            "tags": tags,
-            "generated_at": datetime.utcnow().replace(tzinfo=None).isoformat(),
-        }
-    )
-
-
 @router.get("/profile", response_class=HTMLResponse)
 def profile_get(request: Request, db: Session = Depends(get_db)):
     user = _get_current_user(request, db)
@@ -2018,7 +1947,6 @@ def profile_post(
     theme: str = Form(Theme.system.value),
     purge_days: int = Form(...),
     email: str = Form(""),
-    past_due_tag_bar_enabled: str = Form("0"),
     current_password: str = Form(""),
     new_password: str = Form(""),
     db: Session = Depends(get_db),
@@ -2037,11 +1965,6 @@ def profile_post(
             email=email,
             current_password=current_password or None,
             new_password=new_password or None,
-        )
-        _save_past_due_tag_bar_pref(
-            db,
-            user=user,
-            enabled=str(past_due_tag_bar_enabled or "").lower() in {"1", "true", "yes", "on"},
         )
         db.refresh(user)
         return templates.TemplateResponse(
@@ -3447,177 +3370,6 @@ async def admin_logs_post(request: Request, db: Session = Depends(get_db)):
             ),
             status_code=400,
         )
-
-
-
-
-def _list_validation_logs() -> list[dict[str, Any]]:
-    root = default_validation_log_dir()
-    files: list[dict[str, Any]] = []
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        candidates = sorted(
-            [p for p in root.glob("timeboardapp-validation-*.log") if p.is_file()],
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        for p in candidates[:25]:
-            st = p.stat()
-            files.append(
-                {
-                    "name": p.name,
-                    "size_bytes": int(st.st_size),
-                    "modified": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-                }
-            )
-    except Exception:
-        return []
-    return files
-
-
-def _read_validation_log(filename: str | None) -> tuple[str | None, str | None]:
-    if not filename:
-        return None, None
-    safe_name = Path(filename).name
-    if not safe_name.startswith("timeboardapp-validation-") or not safe_name.endswith(".log"):
-        return None, None
-
-    try:
-        root = default_validation_log_dir().resolve()
-        candidate = (root / safe_name).resolve()
-        if not str(candidate).startswith(str(root)) or not candidate.exists() or not candidate.is_file():
-            return None, None
-        return safe_name, _tail_file(candidate, max_lines=8000)
-    except Exception:
-        return None, None
-
-
-def _validation_loopback_base_url() -> str:
-    return f"http://127.0.0.1:{int(settings.app.port)}"
-
-
-def _new_validation_csrf(request: Request) -> str:
-    token = secrets.token_urlsafe(24)
-    request.session["admin_validation_csrf"] = token
-    return token
-
-
-def _validation_context(
-    request: Request,
-    user: User,
-    db: Session,
-    *,
-    error: str | None = None,
-    success: str | None = None,
-    validation_log: str | None = None,
-    selected_log: str | None = None,
-) -> dict:
-    return _template_context(
-        request,
-        user,
-        db=db,
-        error=error,
-        success=success,
-        validation_csrf=_new_validation_csrf(request),
-        validation_logs=_list_validation_logs(),
-        selected_log=selected_log,
-        validation_log=validation_log,
-        loopback_base_url=_validation_loopback_base_url(),
-        validation_log_dir=str(default_validation_log_dir()),
-    )
-
-
-@router.get("/admin/validation", response_class=HTMLResponse)
-def admin_validation_get(request: Request, log: str | None = None, db: Session = Depends(get_db)):
-    user = _get_current_user(request, db)
-    if not user or not user.is_admin:
-        return _redirect("/dashboard")
-
-    selected, content = _read_validation_log(log)
-    return templates.TemplateResponse(
-        "admin_validation.html",
-        _validation_context(
-            request,
-            user,
-            db,
-            error=None,
-            success=None,
-            validation_log=content,
-            selected_log=selected,
-        ),
-    )
-
-
-@router.post("/admin/validation/run", response_class=HTMLResponse)
-def admin_validation_run(
-    request: Request,
-    csrf_token: str = Form(""),
-    db: Session = Depends(get_db),
-):
-    user = _get_current_user(request, db)
-    if not user or not user.is_admin:
-        return _redirect("/dashboard")
-
-    expected = str(request.session.get("admin_validation_csrf") or "")
-    if not expected or not secrets.compare_digest(expected, str(csrf_token or "")):
-        return templates.TemplateResponse(
-            "admin_validation.html",
-            _validation_context(request, user, db, error="Invalid validation request", success=None),
-            status_code=400,
-        )
-
-    base_url = _validation_loopback_base_url()
-    try:
-        report = run_admin_validation(
-            db,
-            actor=f"admin:{int(user.id)}:{user.username}",
-            base_url=base_url,
-        )
-        log_text = report.to_text()
-        selected = Path(report.log_path).name if report.log_path else None
-        counts = report.counts()
-        success = (
-            "Validation completed. "
-            f"PASS={counts.get('PASS', 0)}, WARN={counts.get('WARN', 0)}, "
-            f"FAIL={counts.get('FAIL', 0)}, SKIP={counts.get('SKIP', 0)}."
-        )
-        return templates.TemplateResponse(
-            "admin_validation.html",
-            _validation_context(
-                request,
-                user,
-                db,
-                error=None if not report.has_failures else "One or more validation checks failed. Copy the log into ChatGPT with the codebase.",
-                success=success,
-                validation_log=log_text,
-                selected_log=selected,
-            ),
-            status_code=200 if not report.has_failures else 400,
-        )
-    except Exception as e:
-        logger.exception("Admin validation run failed")
-        return templates.TemplateResponse(
-            "admin_validation.html",
-            _validation_context(request, user, db, error=str(e), success=None),
-            status_code=500,
-        )
-
-
-@router.get("/admin/validation/logs/{filename}")
-def admin_validation_log_download(request: Request, filename: str, db: Session = Depends(get_db)):
-    user = _get_current_user(request, db)
-    if not user or not user.is_admin:
-        return _redirect("/dashboard")
-
-    safe_name, content = _read_validation_log(filename)
-    if safe_name is None or content is None:
-        return _redirect("/admin/validation")
-
-    return PlainTextResponse(
-        content,
-        media_type="text/plain; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
-    )
 
 
 @router.get("/help", response_class=HTMLResponse)

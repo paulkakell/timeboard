@@ -80,19 +80,6 @@ export TIMEBOARDAPP_JWT_SECRET="..."</code></pre></div>
       </div>
     </section>
 
-
-    <section class="section">
-      <div class="container">
-        <h2>Runtime validation</h2>
-        <p>
-          Admins can run feature validation and security-oriented checks from <strong>Admin → Validation</strong> in a running environment.
-          The same suite is available from the container shell.
-        </p>
-        <div class="code"><pre><code>python -m app.cli validate --base-url http://127.0.0.1:8888</code></pre></div>
-        <p class="small">Validation logs are redacted and written under <code>/data/validation</code> by default.</p>
-      </div>
-    </section>
-
     <section class="section">
       <div class="container">
         <h2>Reverse proxy + TLS</h2>
