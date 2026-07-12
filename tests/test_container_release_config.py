@@ -53,6 +53,23 @@ def test_compose_uses_unique_container_name_as_proxy_alias() -> None:
         ]
 
 
+def test_runtime_jwt_dependency_avoids_python_ecdsa_stack() -> None:
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    normalized = requirements.lower()
+    auth_source = (ROOT / "app" / "auth.py").read_text(encoding="utf-8")
+
+    assert "pyjwt>=2.10,<3.0" in normalized
+    assert "python-jose" not in normalized
+    assert not any(
+        line.strip().lower().startswith("ecdsa")
+        for line in requirements.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+    assert "from jose" not in auth_source
+    assert "from jwt.exceptions import InvalidTokenError" in auth_source
+    assert 'algorithms=["HS256"]' in auth_source
+
+
 def test_workflow_validates_before_publishing_to_ghcr() -> None:
     workflow = (ROOT / ".github" / "workflows" / "docker-image.yml").read_text(
         encoding="utf-8"
