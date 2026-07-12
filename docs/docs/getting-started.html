@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Getting started — TimeboardApp</title>
-  <meta name="description" content="Getting started with TimeboardApp: Docker Compose, first sign-in, and initial admin password." />
+  <meta name="description" content="Getting started with the TimeboardApp GHCR image, Docker Compose, first sign-in, and initial admin password." />
   <link rel="canonical" href="https://timeboardapp.com/docs/getting-started.html" />
   <link rel="icon" href="../assets/img/favicon.ico" />
   <link rel="stylesheet" href="../assets/css/styles.css" />
@@ -37,7 +37,7 @@
       <div class="container">
         <div class="kicker"><span class="dot"></span><span>Docs · Getting started</span></div>
         <h1>Getting started</h1>
-        <p class="lead">Run TimeboardApp locally with Docker Compose. Defaults to <strong>http://localhost:8888</strong>.</p>
+        <p class="lead">Pull the versioned TimeboardApp image from GHCR and run it with Docker Compose. The default URL is <strong>http://localhost:8888</strong>.</p>
       </div>
     </section>
 
@@ -45,51 +45,88 @@
       <div class="container">
         <h2>Prerequisites</h2>
         <ul class="list">
-          <li>Docker + Docker Compose</li>
-          <li>A writable directory for persistent data (SQLite DB + settings.yml)</li>
+          <li>Docker Engine with the Docker Compose plugin</li>
+          <li>A writable directory for persistent <code>settings.yml</code> and the SQLite database</li>
+          <li>The external Docker networks configured in <code>.env</code></li>
+          <li>GHCR authentication if the package is private</li>
         </ul>
 
         <div class="callout">
-          <strong>Ports</strong>
-          <div class="small">Docker Compose publishes container port <code>8888</code> to the host. If you set <code>PORT</code>, the host port changes.</div>
+          <strong>Published image</strong>
+          <div class="small"><code>ghcr.io/paulkakell/timeboardapp:00.13.00</code> is the default image. Compose pulls it rather than building locally.</div>
         </div>
       </div>
     </section>
 
     <section class="section">
       <div class="container">
-        <h2>1) Start the stack</h2>
-        <p>From the repository root:</p>
-        <div class="code"><pre><code>docker compose up --build</code></pre></div>
+        <h2>1) Prepare the environment</h2>
+        <p>Copy the sample environment file and adjust the host port, data directory, container alias, and Docker network names:</p>
+        <div class="code"><pre><code>cp .env.example .env</code></pre></div>
 
-        <p class="small">If your Compose configuration uses an external network (default: <code>net_internal</code>), create it once:</p>
-        <div class="code"><pre><code>docker network create net_internal</code></pre></div>
+        <p class="small">The default external networks can be created once with:</p>
+        <div class="code"><pre><code>docker network create net_internal
+docker network create net_external</code></pre></div>
+
+        <p>If the GHCR package is private, authenticate before pulling:</p>
+        <div class="code"><pre><code>echo "$GHCR_TOKEN" | docker login ghcr.io \
+  -u YOUR_GITHUB_USERNAME --password-stdin</code></pre></div>
       </div>
     </section>
 
     <section class="section">
       <div class="container">
-        <h2>2) Open the UI</h2>
+        <h2>2) Pull and start the stack</h2>
+        <div class="code"><pre><code>docker compose pull
+docker compose up -d</code></pre></div>
+
+        <p class="small">Container port <code>8888</code> is published to the host port specified by <code>PORT</code>.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>3) Open the UI</h2>
         <p>Open:</p>
         <ul class="list">
           <li><a href="http://localhost:8888">http://localhost:8888</a></li>
         </ul>
-
-        <p>If you mapped a different host port (via <code>PORT</code>), use that instead.</p>
+        <p>If you mapped a different host port, use that port instead.</p>
       </div>
     </section>
 
     <section class="section">
       <div class="container">
-        <h2>3) Sign in (first run)</h2>
+        <h2>4) Sign in on first run</h2>
         <p>
-          On first run, TimeboardApp generates an <strong>admin</strong> account and prints a one-time password to the container logs.
-          You can read it with:
+          TimeboardApp generates an <strong>admin</strong> account and prints its initial password to the container logs.
+          The Compose service name is <code>app</code>:
         </p>
-        <div class="code"><pre><code>docker compose logs -f timeboardapp</code></pre></div>
+        <div class="code"><pre><code>docker compose logs -f app</code></pre></div>
 
-        <p class="small">Alternatively, if you have shell access inside the container, you can reset it using the CLI:</p>
-        <div class="code"><pre><code>docker compose exec timeboardapp python -m app.cli reset-admin</code></pre></div>
+        <p class="small">You can reset the password through the CLI:</p>
+        <div class="code"><pre><code>docker compose exec app python -m app.cli reset-admin</code></pre></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Production and demo on one host</h2>
+        <p>Use a unique <code>CONTAINER_NAME</code>, host port, and data directory for each stack:</p>
+        <div class="code"><pre><code># Production
+PORT=3010
+CONFIG_DATA=/srv/timeboardapp/production
+CONTAINER_NAME=timeboardapp
+
+# Demo
+PORT=3011
+CONFIG_DATA=/srv/timeboardapp/demo
+CONTAINER_NAME=timeboardapp-demo</code></pre></div>
+
+        <div class="callout">
+          <strong>Reverse proxy routing</strong>
+          <div class="small">On a shared Docker proxy network, route to <code>timeboardapp:8888</code> and <code>timeboardapp-demo:8888</code>. Do not route to the shared Compose service alias <code>app</code>.</div>
+        </div>
       </div>
     </section>
 
@@ -100,17 +137,17 @@
           <a class="card" href="/docs/configuration.html">
             <div class="badge">Next</div>
             <h3>Configuration</h3>
-            <p>Understand settings.yml and production overrides (base URL, secrets, email).</p>
+            <p>Review settings.yml, base URLs, secrets, email, logging, and notification settings.</p>
           </a>
           <a class="card" href="/docs/deployment.html">
             <div class="badge">Next</div>
             <h3>Deployment</h3>
-            <p>Reverse proxy, TLS, backups, and upgrade strategy.</p>
+            <p>Configure GHCR, reverse proxy routing, backups, upgrades, and rollback.</p>
           </a>
           <a class="card" href="/docs/demo.html">
             <div class="badge">Next</div>
             <h3>Demo mode</h3>
-            <p>Run a public demo safely, with periodic resets and blocked outbound integrations.</p>
+            <p>Run a public demo safely with periodic resets and blocked outbound integrations.</p>
           </a>
         </div>
       </div>
