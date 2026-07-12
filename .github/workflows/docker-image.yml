@@ -87,9 +87,20 @@ jobs:
         run: python -m pip check
 
       - name: Audit Python dependencies
+        shell: bash
         run: |
+          set -o pipefail
           cat requirements.txt requirements-dev.txt > /tmp/timeboardapp-requirements.txt
-          pip-audit -r /tmp/timeboardapp-requirements.txt
+          pip-audit -r /tmp/timeboardapp-requirements.txt 2>&1 | tee pip-audit-output.txt
+
+      - name: Upload dependency audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-results
+          path: pip-audit-output.txt
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Validate Compose configuration
         run: docker compose config > /tmp/timeboardapp-compose.yml
