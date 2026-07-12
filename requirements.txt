@@ -8,7 +8,9 @@ SQLAlchemy>=2.0
 # (and bcrypt enforces a 72-byte password limit). TimeboardApp uses PBKDF2-SHA256
 # to avoid that dependency and keep the image slim and reliable.
 passlib>=1.7
-python-jose[cryptography]>=3.3
+# HS256 JWTs only. PyJWT avoids python-jose's transitive python-ecdsa dependency,
+# which is affected by PYSEC-2026-1325 / CVE-2024-23342 with no planned fix.
+PyJWT>=2.10,<3.0
 PyYAML>=6.0
 APScheduler>=3.10
 itsdangerous>=2.1
