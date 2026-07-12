@@ -68,7 +68,7 @@ jobs:
           pytest -q --tb=short --junitxml=pytest-results.xml | tee pytest-output.txt
 
       - name: Upload test results
-        if: always()
+        if: ${{ always() && hashFiles('pytest-results.xml') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: pytest-results
@@ -94,7 +94,7 @@ jobs:
           pip-audit -r /tmp/timeboardapp-requirements.txt 2>&1 | tee pip-audit-output.txt
 
       - name: Upload dependency audit
-        if: always()
+        if: ${{ always() && hashFiles('pip-audit-output.txt') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: pip-audit-results
