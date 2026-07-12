@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
-from app.auth import authenticate_user, create_access_token, get_current_user_api
+from app.auth import _decode_token, authenticate_user, create_access_token, get_current_user_api
 from app.crud import create_user, get_user_by_username
 from app.db import Base
 from app.migrations import ensure_db_schema
+
+
+LEGACY_HS256_TOKEN = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJzdWIiOiJNaXhlZENhc2VVc2VyIiwiZXhwIjo0MTAyNDQ0ODAwLCJhZG1pbiI6ZmFsc2V9."
+    "WSa4FmKuv2TnxQzJ7GObQWyOlfD1Of9SQ8Zyq01UiAs"
+)
 
 
 def _settings_file(tmp_path) -> str:
@@ -78,6 +87,33 @@ def test_username_lookup_and_authentication_are_case_insensitive(tmp_path, monke
 
         token = create_access_token(subject="MIXEDCASEUSER", is_admin=False)
         assert get_current_user_api(db=db, token=token).id == user.id
+    finally:
+        db.close()
+
+
+def test_existing_hs256_token_format_remains_compatible(tmp_path, monkeypatch) -> None:
+    from app.config import get_settings
+
+    monkeypatch.setenv("TIMEBOARDAPP_SETTINGS", _settings_file(tmp_path))
+    get_settings.cache_clear()
+
+    payload = _decode_token(LEGACY_HS256_TOKEN)
+    assert payload["sub"] == "MixedCaseUser"
+    assert payload["admin"] is False
+    assert int(payload["exp"]) == 4_102_444_800
+
+
+def test_invalid_api_token_is_rejected_after_jwt_backend_change(tmp_path, monkeypatch) -> None:
+    from app.config import get_settings
+
+    monkeypatch.setenv("TIMEBOARDAPP_SETTINGS", _settings_file(tmp_path))
+    get_settings.cache_clear()
+
+    db = _make_session(str(tmp_path / "invalid-token.db"))
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            get_current_user_api(db=db, token="not-a-valid-jwt")
+        assert exc_info.value.status_code == 401
     finally:
         db.close()
 

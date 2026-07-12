@@ -1,5 +1,21 @@
 # Changelog
 
+## 00.13.00
+
+- Additive/Release: Replace the local-only Docker image workflow with CI that runs the full Python test suite, static analysis, dependency validation, Compose validation, a Docker build, and a live container health check before publishing.
+- Additive/Release: Publish multi-architecture `linux/amd64` and `linux/arm64` images to `ghcr.io/paulkakell/timeboardapp` with release-version, commit-SHA, and `latest` tags.
+- Additive/Security: Publish OCI source/revision/version labels, BuildKit provenance, and an SBOM; use the repository-scoped `GITHUB_TOKEN` with `packages: write` only in the publish job.
+- Fix/Security: Replace `python-jose[cryptography]` with PyJWT for the existing HS256 access-token flow, removing the transitive `ecdsa` package affected by `PYSEC-2026-1325` / `CVE-2024-23342`, for which no upstream fix is planned.
+- Fix/Deployment: Replace the unsupported interpolated Compose service-map key with the stable service name `app` and register the unique `CONTAINER_NAME` value as the proxy-facing alias on both configured Docker networks.
+- Fix/Deployment: Replace `build: .` in `docker-compose.yml` with the version-pinned GHCR image and add explicit image/tag settings to `.env.example`.
+- Additive/Build: Add `.dockerignore` rules to exclude local data, secrets, tests, documentation, reports, and repository metadata from the production image build context.
+- Tests: Add regression coverage for version consistency, GHCR image usage, removal of local Compose builds, unique proxy aliases, validation gates, SBOM/provenance configuration, multi-architecture publishing, pre-existing HS256 token compatibility, invalid-token rejection, and prevention of the vulnerable JWT dependency stack being reintroduced.
+- Docs: Document registry authentication, production/demo co-hosting, Nginx Proxy Manager upstreams, the initial Compose service-name migration, upgrades, and rollback by release or SHA tag.
+
+Compatibility: The application, API, database, CLI, and `settings.yml` format are backward compatible and have no schema changes. Existing HS256 API tokens remain compatible when the JWT backend changes to PyJWT. The Compose service name changes to `app`; automation using `docker compose exec timeboardapp` or `docker compose logs timeboardapp` must use `app`. Existing `/data` directories remain compatible. During the first upgrade, remove the prior Compose service with `docker compose down --remove-orphans` before starting the new service with the same `CONTAINER_NAME`.
+
+Refs: User-reported production/demo Docker DNS collision caused by duplicate Compose service aliases; `PYSEC-2026-1325`; `CVE-2024-23342`; PR #29.
+
 ## 00.12.03
 
 - Fix/Security: Auto-repair legacy placeholder or short session/JWT secrets in existing `settings.yml` files and ignore weak secret environment overrides so Admin -> Validation no longer fails runtime secret strength on upgraded deployments.
@@ -20,7 +36,6 @@ Refs: Issue Admin -> Validation 2 warnings / 2 failures, Commit N/A
 Compatibility: Backward compatible (no DB schema changes).
 
 Refs: Issue docker deploy Internal Server Error / TemplateResponse TypeError, Commit N/A
-
 
 ## 00.12.01
 
@@ -44,7 +59,6 @@ Compatibility: Backward compatible (no DB schema changes; the new user setting u
 
 Refs: Issue N/A, Commit N/A
 
-
 ## 00.11.00
 
 - Additive/Branding: Rebrand product name to TimeboardApp across the codebase (UI, docs, config defaults, notification headers/user-agent).
@@ -59,7 +73,6 @@ Compatibility: Backward compatible (no DB schema changes).
 
 Refs: Issue N/A, Commit N/A
 
-
 ## 00.10.00
 
 - Additive: Demo mode in settings.yml (`demo.enabled`) to run TimeboardApp as a safe public demo.
@@ -71,7 +84,6 @@ Refs: Issue N/A, Commit N/A
 Compatibility: Backward compatible (no DB schema changes).
 
 Refs: Issue N/A, Commit N/A
-
 
 ## 00.09.00
 
@@ -94,7 +106,6 @@ Compatibility: Backward compatible (DB migration is additive: new nullable colum
 
 Refs: Issue N/A, Commit N/A
 
-
 ## 00.08.00
 
 - Additive: Calendar view now includes checkbox filters for the color-coded time-left buckets and for Completed/Deleted tasks.
@@ -107,7 +118,6 @@ Compatibility: Backward compatible (DB migration is additive: new nullable `user
 
 Refs: Issue N/A, Commit N/A
 
-
 ## 00.07.01
 
 - Fix: Clarify the login-page password reset link text (now labeled "Reset password").
@@ -117,17 +127,15 @@ Compatibility: Backward compatible.
 
 Refs: Issue N/A, Commit N/A
 
-
 ## 00.07.00
 
-- Additive: First-run installs now seed a small set of demo tasks/tags for the initial admin account (only when the SQLite DB file did not exist before startup).
+- Additive: First-run installs now seed a small set of demo tasks/tags under the initial admin account (only when the SQLite DB file did not exist before startup).
 - Additive: Admin → Database now includes a "Purge All" action to permanently delete tasks, tags, and notification-related data (user accounts + admin settings are preserved). A pre-purge JSON backup is written to `/data/backups`.
 - Fix: Gotify notifications now authenticate using the `X-Gotify-Key` header instead of `?token=...` query params (improves compatibility with reverse proxies/WAFs and avoids leaking tokens in URLs).
 
 Compatibility: Backward compatible.
 
 Refs: Issue N/A, Commit N/A
-
 
 ## 00.06.00
 
@@ -138,7 +146,6 @@ Compatibility: Backward compatible.
 
 Refs: Issue N/A, Commit N/A
 
-
 ## 00.05.01
 
 - Fix: Email (SMTP) delivery failures now include host/port/timeout context (and a Docker/localhost hint) in logs and notification event delivery errors to make configuration and networking issues easier to diagnose.
@@ -146,7 +153,6 @@ Refs: Issue N/A, Commit N/A
 Compatibility: Backward compatible.
 
 Refs: Issue N/A, Commit N/A
-
 
 ## 00.05.00
 
@@ -157,7 +163,6 @@ Refs: Issue N/A, Commit N/A
 Compatibility: Backward compatible (DB migration is additive).
 
 Refs: Issue N/A, Commit N/A
-
 
 ## 00.04.01
 
