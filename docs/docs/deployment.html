@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Deployment — TimeboardApp</title>
-  <meta name="description" content="Deploy TimeboardApp behind a reverse proxy with TLS, configure base_url, and manage backups and upgrades." />
+  <meta name="description" content="Deploy the TimeboardApp GHCR image behind a reverse proxy with isolated storage, versioned upgrades, and rollback." />
   <link rel="canonical" href="https://timeboardapp.com/docs/deployment.html" />
   <link rel="icon" href="../assets/img/favicon.ico" />
   <link rel="stylesheet" href="../assets/css/styles.css" />
@@ -37,7 +37,25 @@
       <div class="container">
         <div class="kicker"><span class="dot"></span><span>Docs · Deployment</span></div>
         <h1>Deployment</h1>
-        <p class="lead">Production deployment guidance: reverse proxy, TLS, base URLs, backups, and upgrades.</p>
+        <p class="lead">Deploy a validated, versioned GHCR image behind a reverse proxy while keeping production and demo identities isolated.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Release image pipeline</h2>
+        <p>Every pull request runs tests, static analysis, dependency checks, Compose validation, a Docker build, and a live health check. Successful pushes to <code>main</code> publish:</p>
+        <ul class="list">
+          <li><code>ghcr.io/paulkakell/timeboardapp:00.13.00</code> — version tag used by Compose</li>
+          <li><code>ghcr.io/paulkakell/timeboardapp:sha-&lt;commit&gt;</code> — commit-oriented audit and rollback tag</li>
+          <li><code>ghcr.io/paulkakell/timeboardapp:latest</code> — latest successful main build</li>
+        </ul>
+        <p>The image is published for <code>linux/amd64</code> and <code>linux/arm64</code> with OCI metadata, provenance, and an SBOM.</p>
+
+        <div class="callout">
+          <strong>Package visibility</strong>
+          <div class="small">If the GHCR package is private, authenticate the deployment host with a package-read token. For unauthenticated pulls, change the package visibility to public in GitHub.</div>
+        </div>
       </div>
     </section>
 
@@ -46,19 +64,19 @@
         <h2>Recommended production shape</h2>
         <div class="grid cols-3">
           <div class="card">
-            <div class="badge">Network</div>
-            <h3>Reverse proxy</h3>
-            <p>Run TimeboardApp on an internal port (8888) and terminate TLS at Nginx/Caddy/Traefik.</p>
+            <div class="badge">Image</div>
+            <h3>Version pin</h3>
+            <p>Set <code>TIMEBOARDAPP_TAG</code> to a release or SHA tag instead of relying on an untracked local build.</p>
           </div>
           <div class="card">
             <div class="badge">Storage</div>
-            <h3>Persistent volume</h3>
-            <p>Mount <code>/data</code> to persist <code>settings.yml</code> and the SQLite database.</p>
+            <h3>Dedicated /data</h3>
+            <p>Give every stack its own host directory for <code>settings.yml</code>, the SQLite database, logs, and backups.</p>
           </div>
           <div class="card">
-            <div class="badge">Secrets</div>
-            <h3>Env overrides</h3>
-            <p>Provide secrets via environment variables to keep them out of the repository.</p>
+            <div class="badge">Network</div>
+            <h3>Unique alias</h3>
+            <p>Set a unique <code>CONTAINER_NAME</code>. Compose registers that value as the reverse-proxy-facing network alias.</p>
           </div>
         </div>
       </div>
@@ -66,69 +84,96 @@
 
     <section class="section">
       <div class="container">
-        <h2>Base URL (important)</h2>
-        <p>
-          If TimeboardApp is served behind a reverse proxy (for example at <code>https://tasks.example.com</code>), set <code>app.base_url</code>
-          (or <code>TIMEBOARDAPP_BASE_URL</code>) so that external notifications and links use the correct host.
-        </p>
+        <h2>Production and demo configuration</h2>
+        <p>Production:</p>
+        <div class="code"><pre><code>TIMEBOARDAPP_IMAGE=ghcr.io/paulkakell/timeboardapp
+TIMEBOARDAPP_TAG=00.13.00
+PORT=3010
+CONFIG_DATA=/srv/timeboardapp/production
+CONTAINER_NAME=timeboardapp
+INTERNAL_NETWORK=net_internal
+EXTERNAL_NETWORK=net_external</code></pre></div>
 
+        <p>Demo:</p>
+        <div class="code"><pre><code>TIMEBOARDAPP_IMAGE=ghcr.io/paulkakell/timeboardapp
+TIMEBOARDAPP_TAG=00.13.00
+PORT=3011
+CONFIG_DATA=/srv/timeboardapp/demo
+CONTAINER_NAME=timeboardapp-demo
+INTERNAL_NETWORK=net_internal
+EXTERNAL_NETWORK=net_external</code></pre></div>
+
+        <p>Each data directory must contain its own <code>settings.yml</code>. Production should use <code>demo.enabled: false</code>; the public demo should use <code>demo.enabled: true</code>.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Reverse proxy routing</h2>
+        <p>When Nginx Proxy Manager shares the external Docker network, use the unique alias and container port:</p>
+        <div class="code"><pre><code>timeboard.bitterhost.com  -&gt; timeboardapp:8888
+demo.timeboardapp.com     -&gt; timeboardapp-demo:8888</code></pre></div>
+
+        <div class="callout">
+          <strong>Do not use the Compose service alias</strong>
+          <div class="small">The service is named <code>app</code> in every stack. That name is intentionally not a proxy target because it is duplicated when multiple stacks share a network.</div>
+        </div>
+
+        <p>If the proxy reaches the Docker host instead of the shared Docker network, forward to host ports <code>3010</code> and <code>3011</code>.</p>
+
+        <p>A reverse proxy should forward <code>Host</code>, <code>X-Forwarded-Proto</code>, and <code>X-Forwarded-For</code>, and allow long-lived Server-Sent Event connections for browser notifications.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Base URL</h2>
+        <p>Set the public URL independently in each stack:</p>
         <div class="code"><pre><code>app:
-  base_url: "https://tasks.example.com"</code></pre></div>
-
-        <div class="callout">
-          <strong>Cookies and redirects</strong>
-          <div class="small">If the base URL does not match your public origin, you may see login redirects or incorrect links in emails/webhooks.</div>
-        </div>
+  base_url: "https://timeboard.bitterhost.com"</code></pre></div>
+        <p>The demo stack should use <code>https://demo.timeboardapp.com</code>. The value may also be supplied through <code>TIMEBOARDAPP_BASE_URL</code>.</p>
       </div>
     </section>
 
     <section class="section">
       <div class="container">
-        <h2>Reverse proxy notes</h2>
-        <p>TimeboardApp is a standard HTTP app. A reverse proxy should:</p>
-        <ul class="list">
-          <li>Forward <code>Host</code> and <code>X-Forwarded-Proto</code> headers</li>
-          <li>Support WebSockets or SSE if you use browser notifications (Server-Sent Events)</li>
-          <li>Increase timeouts for long-lived connections if required</li>
-        </ul>
-
-        <p class="small">Example (Nginx) — illustrative only:</p>
-        <div class="code"><pre><code>location / {
-  proxy_pass http://127.0.0.1:8888;
-  proxy_set_header Host $host;
-  proxy_set_header X-Forwarded-Proto $scheme;
-  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-}</code></pre></div>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="container">
-        <h2>Backups</h2>
-        <p>
-          SQLite backups are straightforward. Stop the container (or ensure no writes), then copy the database file from the mounted volume.
-          For example, if you mount <code>./data</code> to <code>/data</code>, copy <code>./data/timeboardapp.db</code>.
-        </p>
-
-        <div class="callout">
-          <strong>Export/Import</strong>
-          <div class="small">The Admin UI also supports export/import workflows for migrations and recovery.</div>
-        </div>
+        <h2>First migration to 00.13.00</h2>
+        <p>This release changes the Compose service name to <code>app</code> and removes the local <code>build: .</code> path. Back up the data directory, then remove the previous service before starting the GHCR-backed service with the same configured container name:</p>
+        <div class="code"><pre><code>docker compose down --remove-orphans
+docker compose pull
+docker compose up -d
+docker compose logs -f app</code></pre></div>
+        <p>The bind-mounted <code>/data</code> directory is retained. No database migration or data conversion is introduced by this release.</p>
       </div>
     </section>
 
     <section class="section">
       <div class="container">
         <h2>Upgrades</h2>
-        <p>Recommended upgrade pattern:</p>
         <ol class="list">
-          <li>Backup your database and settings volume</li>
-          <li>Pull the latest image (or rebuild)</li>
-          <li>Start the container and review logs</li>
-          <li>Validate UI + API functionality</li>
+          <li>Back up the database and settings directory</li>
+          <li>Set <code>TIMEBOARDAPP_TAG</code> to the target release</li>
+          <li>Run <code>docker compose pull</code></li>
+          <li>Run <code>docker compose up -d</code></li>
+          <li>Review logs, <code>/healthz</code>, the UI, API, and Admin → Validation</li>
         </ol>
+      </div>
+    </section>
 
-        <p class="small">TimeboardApp includes lightweight schema migration logic on startup.</p>
+    <section class="section">
+      <div class="container">
+        <h2>Rollback</h2>
+        <p>Pin <code>TIMEBOARDAPP_TAG</code> to a previously published release or exact <code>sha-&lt;commit&gt;</code> tag, then pull and recreate the service:</p>
+        <div class="code"><pre><code>docker compose pull
+docker compose up -d</code></pre></div>
+        <p>For the initial migration from a locally built pre-00.13.00 image, retain or retag the old local image until the new deployment is validated. Version 00.13.00 has no database schema changes, so a database rollback is not required.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Backups</h2>
+        <p>Back up the complete host directory mapped to <code>/data</code>. The Admin UI also supports JSON export/import and scheduled backup retention.</p>
       </div>
     </section>
   </main>
