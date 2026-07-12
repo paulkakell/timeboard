@@ -16,6 +16,16 @@ def _app_version() -> str:
     return str(namespace["APP_VERSION"])
 
 
+def _active_requirements() -> list[str]:
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    active: list[str] = []
+    for raw_line in requirements.splitlines():
+        line = raw_line.partition("#")[0].strip().lower()
+        if line:
+            active.append(line)
+    return active
+
+
 def test_release_version_is_consistent_across_deployment_files() -> None:
     version = _app_version()
     assert VERSION_PATTERN.fullmatch(version)
@@ -54,17 +64,12 @@ def test_compose_uses_unique_container_name_as_proxy_alias() -> None:
 
 
 def test_runtime_jwt_dependency_avoids_python_ecdsa_stack() -> None:
-    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    normalized = requirements.lower()
+    requirements = _active_requirements()
     auth_source = (ROOT / "app" / "auth.py").read_text(encoding="utf-8")
 
-    assert "pyjwt>=2.10,<3.0" in normalized
-    assert "python-jose" not in normalized
-    assert not any(
-        line.strip().lower().startswith("ecdsa")
-        for line in requirements.splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    )
+    assert "pyjwt>=2.10,<3.0" in requirements
+    assert not any(req.startswith("python-jose") for req in requirements)
+    assert not any(req.startswith("ecdsa") for req in requirements)
     assert "from jose" not in auth_source
     assert "from jwt.exceptions import InvalidTokenError" in auth_source
     assert 'algorithms=["HS256"]' in auth_source
