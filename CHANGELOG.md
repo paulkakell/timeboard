@@ -1,5 +1,20 @@
 # Changelog
 
+## 00.13.00
+
+- Additive/Release: Replace the local-only Docker image workflow with CI that runs the full Python test suite, static analysis, dependency validation, Compose validation, a Docker build, and a live container health check before publishing.
+- Additive/Release: Publish multi-architecture `linux/amd64` and `linux/arm64` images to `ghcr.io/paulkakell/timeboardapp` with release-version, commit-SHA, and `latest` tags.
+- Additive/Security: Publish OCI source/revision/version labels, BuildKit provenance, and an SBOM; use the repository-scoped `GITHUB_TOKEN` with `packages: write` only in the publish job.
+- Fix/Deployment: Replace the unsupported interpolated Compose service-map key with the stable service name `app` and register the unique `CONTAINER_NAME` value as the proxy-facing alias on both configured Docker networks.
+- Fix/Deployment: Replace `build: .` in `docker-compose.yml` with the version-pinned GHCR image and add explicit image/tag settings to `.env.example`.
+- Additive/Build: Add `.dockerignore` rules to exclude local data, secrets, tests, documentation, reports, and repository metadata from the production image build context.
+- Tests: Add regression coverage for version consistency, GHCR image usage, removal of local Compose builds, unique proxy aliases, validation gates, SBOM/provenance configuration, and multi-architecture publishing.
+- Docs: Document registry authentication, production/demo co-hosting, Nginx Proxy Manager upstreams, the initial Compose service-name migration, upgrades, and rollback by release or SHA tag.
+
+Compatibility: The application, API, database, CLI, and `settings.yml` format are backward compatible and have no schema changes. The Compose service name changes to `app`; automation using `docker compose exec timeboardapp` or `docker compose logs timeboardapp` must use `app`. Existing `/data` directories remain compatible. During the first upgrade, remove the prior Compose service with `docker compose down --remove-orphans` before starting the new service with the same `CONTAINER_NAME`.
+
+Refs: User-reported production/demo Docker DNS collision caused by duplicate Compose service aliases; implementation commits are recorded in the associated pull request.
+
 ## 00.12.03
 
 - Fix/Security: Auto-repair legacy placeholder or short session/JWT secrets in existing `settings.yml` files and ignore weak secret environment overrides so Admin -> Validation no longer fails runtime secret strength on upgraded deployments.
@@ -20,7 +35,6 @@ Refs: Issue Admin -> Validation 2 warnings / 2 failures, Commit N/A
 Compatibility: Backward compatible (no DB schema changes).
 
 Refs: Issue docker deploy Internal Server Error / TemplateResponse TypeError, Commit N/A
-
 
 ## 00.12.01
 
@@ -44,7 +58,6 @@ Compatibility: Backward compatible (no DB schema changes; the new user setting u
 
 Refs: Issue N/A, Commit N/A
 
-
 ## 00.11.00
 
 - Additive/Branding: Rebrand product name to TimeboardApp across the codebase (UI, docs, config defaults, notification headers/user-agent).
@@ -59,7 +72,6 @@ Compatibility: Backward compatible (no DB schema changes).
 
 Refs: Issue N/A, Commit N/A
 
-
 ## 00.10.00
 
 - Additive: Demo mode in settings.yml (`demo.enabled`) to run TimeboardApp as a safe public demo.
@@ -71,7 +83,6 @@ Refs: Issue N/A, Commit N/A
 Compatibility: Backward compatible (no DB schema changes).
 
 Refs: Issue N/A, Commit N/A
-
 
 ## 00.09.00
 
@@ -94,7 +105,6 @@ Compatibility: Backward compatible (DB migration is additive: new nullable colum
 
 Refs: Issue N/A, Commit N/A
 
-
 ## 00.08.00
 
 - Additive: Calendar view now includes checkbox filters for the color-coded time-left buckets and for Completed/Deleted tasks.
@@ -107,7 +117,6 @@ Compatibility: Backward compatible (DB migration is additive: new nullable `user
 
 Refs: Issue N/A, Commit N/A
 
-
 ## 00.07.01
 
 - Fix: Clarify the login-page password reset link text (now labeled "Reset password").
@@ -116,7 +125,6 @@ Refs: Issue N/A, Commit N/A
 Compatibility: Backward compatible.
 
 Refs: Issue N/A, Commit N/A
-
 
 ## 00.07.00
 
@@ -128,7 +136,6 @@ Compatibility: Backward compatible.
 
 Refs: Issue N/A, Commit N/A
 
-
 ## 00.06.00
 
 - Additive: Email can now be delivered via SendGrid API (v3) as an alternative to SMTP. Configurable in Admin → Email and via the Admin email settings API.
@@ -137,56 +144,3 @@ Refs: Issue N/A, Commit N/A
 Compatibility: Backward compatible.
 
 Refs: Issue N/A, Commit N/A
-
-
-## 00.05.01
-
-- Fix: Email (SMTP) delivery failures now include host/port/timeout context (and a Docker/localhost hint) in logs and notification event delivery errors to make configuration and networking issues easier to diagnose.
-
-Compatibility: Backward compatible.
-
-Refs: Issue N/A, Commit N/A
-
-
-## 00.05.00
-
-- Additive: Asynchronous delivery for all non-browser notification services (email, gotify, ntfy, discord, webhook, generic_api, wns) so task create/update/complete no longer blocks on network calls.
-- Additive: Notification delivery status and error fields are now persisted on `notification_events` and returned by the notifications events API to aid troubleshooting.
-- Fix: Outbound notification HTTP failures now include safe URL context (query stripped) and response snippets, and async worker failures are logged with event/service/user context.
-
-Compatibility: Backward compatible (DB migration is additive).
-
-Refs: Issue N/A, Commit N/A
-
-
-## 00.04.01
-
-- Additive: Dashboard page size default is now 10 (options now include 10, 25, 50, 100, 200).
-
-Compatibility: Backward compatible.
-
-## 00.04.00
-
-- Fix: Discord webhook notifications now use an embed so the task name is a clickable link to the task entry (when an absolute URL is available via `app.base_url` or a task's `url`).
-- Additive: Profile → Notifications: clicking a generated `notify:…` routing tag now copies it to the clipboard.
-- Additive: `TIMEBOARDAPP_BASE_URL` environment variable can override `app.base_url` (useful for generating absolute links in external notifications).
-
-Compatibility: Backward compatible.
-
-## 00.03.01
-
-- Fix: Correct broken module imports in API routers that prevented the container from starting (Portainer deployments crashed with `ModuleNotFoundError: No module named 'app.database'`).
-  - `app/routers/api_admin.py` now imports `get_db` from `app.db` and `list_log_files` from `app.logging_setup`.
-  - `app/routers/api_notifications.py` now imports `get_db` from `app.db`.
-
-Compatibility: Backward compatible.
-
-## 00.03.02
-
-- Fix: Database schema upgrade banner now behaves like a one-time notification (shown once after an actual upgrade, then cleared) instead of reappearing on every page load.
-- Fix: Discord webhook notifications now send Discord-friendly Markdown (not HTML), disable @mention parsing by default, and accept common legacy config keys (e.g. `url`).
-- Fix: Dashboard filters are now stateful across navigation within a session until explicitly reset.
-- Additive: Notification payloads now include `due_date_display` (stable UTC string) for downstream webhook/API consumers.
-- Fix/Security: Outbound notification URLs are now restricted to `http://` and `https://` schemes.
-
-Compatibility: Backward compatible.
