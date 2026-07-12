@@ -1,18 +1,190 @@
-name: Docker Image CI
+name: CI and GHCR Image
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+    tags: ["v*.*.*"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: paulkakell/timeboardapp
+  PYTHON_VERSION: "3.11"
 
 jobs:
-
-  build:
-
+  validate:
+    name: Tests, security, and image smoke test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Validate release version
+        run: |
+          APP_VERSION="$(python -c 'from app.version import APP_VERSION; print(APP_VERSION)')"
+          echo "APP_VERSION=${APP_VERSION}" >> "$GITHUB_ENV"
+          if ! grep -Eq '^[0-9]{2}\.[0-9]{2}\.[0-9]{2}$' <<<"${APP_VERSION}"; then
+            echo "APP_VERSION must use the xx.xx.xx format; found ${APP_VERSION}" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${APP_VERSION}" ]]; then
+            echo "Git tag ${GITHUB_REF_NAME} does not match application version v${APP_VERSION}" >&2
+            exit 1
+          fi
+
+      - name: Run full test suite
+        run: pytest -q
+
+      - name: Run static analysis
+        run: |
+          python -m compileall -q app tests
+          bandit -r app -ll -q
+
+      - name: Validate installed dependencies
+        run: python -m pip check
+
+      - name: Audit Python dependencies
+        run: |
+          cat requirements.txt requirements-dev.txt > /tmp/timeboardapp-requirements.txt
+          pip-audit -r /tmp/timeboardapp-requirements.txt
+
+      - name: Validate Compose configuration
+        run: docker compose config > /tmp/timeboardapp-compose.yml
+
+      - name: Build release image
+        run: docker build --pull --tag timeboardapp:ci .
+
+      - name: Smoke test release image
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker run -d --rm -p 127.0.0.1:18888:8888 timeboardapp:ci)"
+          cleanup() {
+            docker rm -f "${container_id}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 30); do
+            if response="$(curl -fsS http://127.0.0.1:18888/healthz 2>/dev/null)"; then
+              RESPONSE="${response}" python - <<'PY'
+import json
+import os
+
+payload = json.loads(os.environ["RESPONSE"])
+assert payload["status"] == "ok"
+assert payload["version"] == os.environ["APP_VERSION"]
+PY
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs "${container_id}" 2>&1 \
+            | sed -E 's/(Password: ).*/\1[REDACTED]/' >&2 || true
+          echo "Container health check did not become ready" >&2
+          exit 1
+
+  publish:
+    name: Publish multi-architecture GHCR image
+    needs: validate
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Read and validate application version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(python -c 'from app.version import APP_VERSION; print(APP_VERSION)')"
+          if ! grep -Eq '^[0-9]{2}\.[0-9]{2}\.[0-9]{2}$' <<<"${VERSION}"; then
+            echo "APP_VERSION must use the xx.xx.xx format; found ${VERSION}" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${VERSION}" ]]; then
+            echo "Git tag ${GITHUB_REF_NAME} does not match application version v${VERSION}" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=TimeboardApp
+            org.opencontainers.image.description=Dockerized recurring task board
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+
+      - name: Build and publish image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Publish summary
+        run: |
+          {
+            echo "### Published container image"
+            echo
+            echo "- Registry: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\`"
+            echo "- Version: \`${{ steps.version.outputs.version }}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
+          } >> "$GITHUB_STEP_SUMMARY"
