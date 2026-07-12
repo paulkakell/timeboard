@@ -1,5 +1,5 @@
 services:
-  timeboardapp:
+   ${CONTAINER_NAME:-timeboardapp}:
     build: .
     container_name: ${CONTAINER_NAME:-timeboardapp}
     environment:
