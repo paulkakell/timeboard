@@ -6,9 +6,10 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
+import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -145,6 +146,7 @@ def create_access_token(*, subject: str, is_admin: bool, expires_minutes: int = 
 
 def _decode_token(token: str) -> dict:
     settings = get_settings()
+    # Keep the accepted algorithm fixed rather than trusting the token header.
     return jwt.decode(token, settings.security.jwt_secret, algorithms=["HS256"])
 
 
@@ -159,7 +161,7 @@ def get_current_user_api(db: Session = Depends(get_db), token: str = Depends(oau
         username: str | None = payload.get("sub")
         if username is None:
             raise credentials_exception
-    except JWTError:
+    except InvalidTokenError:
         raise credentials_exception
 
     user = db.query(User).filter(func.lower(User.username) == str(username).lower()).first()
