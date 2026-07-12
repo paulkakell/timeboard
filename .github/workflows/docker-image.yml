@@ -89,14 +89,7 @@ jobs:
 
           for _ in $(seq 1 30); do
             if response="$(curl -fsS http://127.0.0.1:18888/healthz 2>/dev/null)"; then
-              RESPONSE="${response}" python - <<'PY'
-import json
-import os
-
-payload = json.loads(os.environ["RESPONSE"])
-assert payload["status"] == "ok"
-assert payload["version"] == os.environ["APP_VERSION"]
-PY
+              RESPONSE="${response}" python -c 'import json, os; payload = json.loads(os.environ["RESPONSE"]); assert payload["status"] == "ok"; assert payload["version"] == os.environ["APP_VERSION"]'
               exit 0
             fi
             sleep 1
