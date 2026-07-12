@@ -5,15 +5,16 @@
 - Additive/Release: Replace the local-only Docker image workflow with CI that runs the full Python test suite, static analysis, dependency validation, Compose validation, a Docker build, and a live container health check before publishing.
 - Additive/Release: Publish multi-architecture `linux/amd64` and `linux/arm64` images to `ghcr.io/paulkakell/timeboardapp` with release-version, commit-SHA, and `latest` tags.
 - Additive/Security: Publish OCI source/revision/version labels, BuildKit provenance, and an SBOM; use the repository-scoped `GITHUB_TOKEN` with `packages: write` only in the publish job.
+- Fix/Security: Replace `python-jose[cryptography]` with PyJWT for the existing HS256 access-token flow, removing the transitive `ecdsa` package affected by `PYSEC-2026-1325` / `CVE-2024-23342`, for which no upstream fix is planned.
 - Fix/Deployment: Replace the unsupported interpolated Compose service-map key with the stable service name `app` and register the unique `CONTAINER_NAME` value as the proxy-facing alias on both configured Docker networks.
 - Fix/Deployment: Replace `build: .` in `docker-compose.yml` with the version-pinned GHCR image and add explicit image/tag settings to `.env.example`.
 - Additive/Build: Add `.dockerignore` rules to exclude local data, secrets, tests, documentation, reports, and repository metadata from the production image build context.
-- Tests: Add regression coverage for version consistency, GHCR image usage, removal of local Compose builds, unique proxy aliases, validation gates, SBOM/provenance configuration, and multi-architecture publishing.
+- Tests: Add regression coverage for version consistency, GHCR image usage, removal of local Compose builds, unique proxy aliases, validation gates, SBOM/provenance configuration, multi-architecture publishing, pre-existing HS256 token compatibility, invalid-token rejection, and prevention of the vulnerable JWT dependency stack being reintroduced.
 - Docs: Document registry authentication, production/demo co-hosting, Nginx Proxy Manager upstreams, the initial Compose service-name migration, upgrades, and rollback by release or SHA tag.
 
-Compatibility: The application, API, database, CLI, and `settings.yml` format are backward compatible and have no schema changes. The Compose service name changes to `app`; automation using `docker compose exec timeboardapp` or `docker compose logs timeboardapp` must use `app`. Existing `/data` directories remain compatible. During the first upgrade, remove the prior Compose service with `docker compose down --remove-orphans` before starting the new service with the same `CONTAINER_NAME`.
+Compatibility: The application, API, database, CLI, and `settings.yml` format are backward compatible and have no schema changes. Existing HS256 API tokens remain compatible when the JWT backend changes to PyJWT. The Compose service name changes to `app`; automation using `docker compose exec timeboardapp` or `docker compose logs timeboardapp` must use `app`. Existing `/data` directories remain compatible. During the first upgrade, remove the prior Compose service with `docker compose down --remove-orphans` before starting the new service with the same `CONTAINER_NAME`.
 
-Refs: User-reported production/demo Docker DNS collision caused by duplicate Compose service aliases; implementation commits are recorded in the associated pull request.
+Refs: User-reported production/demo Docker DNS collision caused by duplicate Compose service aliases; `PYSEC-2026-1325`; `CVE-2024-23342`; PR #29.
 
 ## 00.12.03
 
