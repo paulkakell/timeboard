@@ -1,14 +1,19 @@
 services:
-   ${CONTAINER_NAME:-timeboardapp}:
-    build: .
+  app:
+    image: "${TIMEBOARDAPP_IMAGE:-ghcr.io/paulkakell/timeboardapp}:${TIMEBOARDAPP_TAG:-00.13.00}"
     container_name: ${CONTAINER_NAME:-timeboardapp}
+    pull_policy: always
     environment:
       - TZ=${TZ:-UTC}
       - PGID=${PGID:-1000}
       - PUID=${PUID:-1000}
     networks:
-      - net_internal
-      - net_external
+      net_internal:
+        aliases:
+          - ${CONTAINER_NAME:-timeboardapp}
+      net_external:
+        aliases:
+          - ${CONTAINER_NAME:-timeboardapp}
     ports:
       - "${PORT:-8888}:8888"
     restart: unless-stopped
