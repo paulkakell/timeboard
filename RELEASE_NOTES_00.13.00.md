@@ -10,6 +10,8 @@ TimeboardApp containers are now built and validated by GitHub Actions and publis
 
 This release also corrects the production/demo Docker DNS collision. Compose map keys are not a reliable place for environment-variable interpolation, so the service now has the stable name `app`. Each stack’s unique `CONTAINER_NAME` value is registered as its proxy-facing network alias, allowing production and demo to coexist on the same Nginx Proxy Manager network without both advertising `timeboardapp`.
 
+Release validation identified `PYSEC-2026-1325` / `CVE-2024-23342` in the transitive `ecdsa` dependency installed by `python-jose[cryptography]`. Because TimeboardApp uses only symmetric HS256 tokens, the JWT implementation now uses PyJWT and no longer installs the affected ECDSA package.
+
 ## Published artifacts
 
 After the release is merged and the `main` workflow succeeds, GHCR publishes:
@@ -39,8 +41,9 @@ The release tag must use the application version format and match `v00.13.00`.
 - Replaced Compose `build: .` with the version-pinned GHCR image.
 - Replaced the attempted variable service-map key with the stable Compose service name `app`.
 - Added unique network aliases based on `CONTAINER_NAME` for both external networks.
+- Replaced `python-jose[cryptography]` with `PyJWT>=2.10,<3.0` for HS256 token encoding and validation, removing the vulnerable `ecdsa` dependency.
 - Added `.dockerignore` rules to prevent local data, environment files, tests, reports, and repository metadata from entering the build context.
-- Added regression tests for the release version, GHCR path, Compose topology, validation gates, architectures, provenance, and SBOM settings.
+- Added regression tests for the release version, GHCR path, Compose topology, validation gates, architectures, provenance, SBOM settings, existing-token compatibility, invalid-token rejection, and dependency selection.
 - Updated README and static deployment, getting-started, and architecture documentation.
 
 ## Compatibility
@@ -49,7 +52,8 @@ The application runtime is backward compatible:
 
 - No database schema changes
 - No migrations
-- No API changes
+- No API endpoint or payload changes
+- Existing HS256 bearer tokens remain compatible with the PyJWT backend
 - No CLI option changes
 - No `settings.yml` format changes
 - Existing `/data` directories remain compatible
@@ -104,7 +108,7 @@ For deployments already using GHCR, set `TIMEBOARDAPP_TAG` to the previous relea
 
 For the initial migration from the source-built deployment, retain the old local image until the new release is accepted. Restore the previous Compose file and local image if rollback is required.
 
-No database rollback is necessary because version 00.13.00 does not alter the schema or persistent data format.
+No database rollback is necessary because version 00.13.00 does not alter the schema or persistent data format. Existing HS256 tokens remain valid when rolling forward or backward between the two JWT libraries as long as the JWT secret is unchanged.
 
 ## Security review
 
@@ -113,6 +117,7 @@ No database rollback is necessary because version 00.13.00 does not alter the sc
 - The deployment host should use a package-read token rather than a broad personal token.
 - `.dockerignore` excludes `.env`, persistent databases, logs, backups, and validation output.
 - Dependency auditing and Bandit medium/high checks gate image publishing.
+- `python-jose` and its transitive `ecdsa` dependency were removed after `pip-audit` reported the high-severity Minerva timing advisory `PYSEC-2026-1325` / `CVE-2024-23342`; PyJWT retains a fixed HS256 allow-list during token decoding.
 - The image still follows the existing runtime user model; changing container privileges is outside this release and should be assessed separately before a future hardening change.
 
 ## Validation gates
